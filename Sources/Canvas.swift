@@ -36,7 +36,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     private let laser = LaserPointerView()
     private var textDraft: (scroll: NSScrollView, editor: NSTextView, style: InkText.Style)?
     private var textDrag: TextDrag?
-    private var pendingMarkClick: (index: Int, start: CGPoint)?
     var textEditor: NSTextView? { textDraft?.editor }
     private(set) var tool: Tool = .pen
     var isLaserActive: Bool { tool == .laser }
@@ -133,7 +132,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        pendingMarkClick = nil
         if let index = markIndex(at: convert(event.locationInWindow, from: nil)) {
             if let text = marks[index] as? InkText {
                 return InkStyleMenu.text(text.style) { [weak self] style in
@@ -157,26 +155,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
             UserDefaults.standard.set(style.width, forKey: key)
             self?.palette.select(style.color)
         }
-    }
-
-    private func colorMenu(for index: Int) -> NSMenu? {
-        guard marks.indices.contains(index) else { return nil }
-        if let stroke = marks[index] as? InkStroke {
-            return InkStyleMenu.colors(selected: stroke.style.color) { [weak self, weak stroke] color in
-                guard let stroke else { return }
-                var style = stroke.style
-                style.color = color
-                self?.restyleStroke(stroke, to: style)
-            }
-        }
-        if let text = marks[index] as? InkText {
-            return InkStyleMenu.colors(selected: text.style.color) { [weak self] color in
-                var style = text.style
-                style.color = color
-                self?.restyleText(at: index, to: style)
-            }
-        }
-        return nil
     }
 
     private func restyleStroke(_ stroke: InkStroke, to style: InkStroke.Style) {
@@ -227,25 +205,19 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     override func mouseDown(with event: NSEvent) {
         if isLaserActive { moveLaser(with: event); return }
         let point = convert(event.locationInWindow, from: nil)
-        pendingMarkClick = nil
-        finishTextDrag()
-        if textDraft != nil {
-            commitText()
-            return
-        }
-        if let index = markIndex(at: point) {
-            // Wait for mouse-up so a drag starting on ink still draws or moves text.
-            pendingMarkClick = (index, point)
-            return
-        }
         if tool == .text {
-            beginText(at: point)
-        } else {
-            beginStroke(at: point)
+            finishTextDrag()
+            if textDraft != nil {
+                commitText()
+            } else if let index = marks.indices.reversed().first(where: {
+                marks[$0] is InkText && marks[$0].bounds.contains(point)
+            }), let text = marks[index] as? InkText {
+                textDrag = TextDrag(index: index, original: text, start: point)
+            } else {
+                beginText(at: point)
+            }
+            return
         }
-    }
-
-    private func beginStroke(at point: CGPoint) {
         let stroke = InkStroke(start: point, color: palette.selected, isRectangle: tool == .rectangle, width: strokeWidth)
         if tool == .pen { record(stroke) }
         live.stroke = stroke
@@ -255,17 +227,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     override func mouseDragged(with event: NSEvent) {
         if isLaserActive { moveLaser(with: event); return }
         let point = convert(event.locationInWindow, from: nil)
-        if let click = pendingMarkClick {
-            guard hypot(point.x - click.start.x, point.y - click.start.y) >= 3 else { return }
-            pendingMarkClick = nil
-            if tool == .text {
-                if let text = marks[click.index] as? InkText {
-                    textDrag = TextDrag(index: click.index, original: text, start: click.start)
-                }
-            } else {
-                beginStroke(at: click.start)
-            }
-        }
         if let drag = textDrag {
             let previous = marks[drag.index].bounds
             let moved = drag.original.moved(dx: point.x - drag.start.x, dy: point.y - drag.start.y, within: bounds)
@@ -282,12 +243,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     override func mouseUp(with event: NSEvent) {
         if isLaserActive { moveLaser(with: event); return }
         mouseDragged(with: event)
-        if let click = pendingMarkClick {
-            pendingMarkClick = nil
-            let point = convert(event.locationInWindow, from: nil)
-            colorMenu(for: click.index)?.popUp(positioning: nil, at: point, in: self)
-            return
-        }
         finishTextDrag()
         finishLiveInk()
     }
@@ -351,7 +306,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     private func finishLiveInk() {
-        pendingMarkClick = nil
         guard let stroke = live.stroke else { return }
         if tool == .rectangle && stroke.hasInk { record(stroke) }
         setNeedsDisplay(stroke.bounds)
@@ -379,7 +333,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     func undoLastEdit() {
-        pendingMarkClick = nil
         if textDraft != nil { cancelText(); return }
         finishTextDrag()
         if tool == .rectangle, let rectangle = live.stroke {
@@ -398,7 +351,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     func clear() {
-        pendingMarkClick = nil
         cancelText()
         finishTextDrag()
         discardLiveInk()
