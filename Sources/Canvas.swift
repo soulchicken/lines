@@ -11,7 +11,7 @@ private final class LiveInkView: NSView {
     }
 }
 
-final class InkCanvas: NSView {
+final class InkCanvas: NSView, NSTextViewDelegate {
     enum Tool {
         case pen, rectangle, text, laser
     }
@@ -19,7 +19,8 @@ final class InkCanvas: NSView {
     private enum Edit {
         case addMark
         case clear([InkMark])
-        case moveText(index: Int, previous: InkText)
+        case replaceText(index: Int, previous: InkText)
+        case restyleStroke(InkStroke, previous: InkStroke.Style)
     }
 
     private struct TextDrag {
@@ -33,7 +34,7 @@ final class InkCanvas: NSView {
     private var history: [Edit] = []
     private let live = LiveInkView()
     private let laser = LaserPointerView()
-    private var textDraft: (scroll: NSScrollView, editor: NSTextView, color: PenColor)?
+    private var textDraft: (scroll: NSScrollView, editor: NSTextView, style: InkText.Style)?
     private var textDrag: TextDrag?
     var textEditor: NSTextView? { textDraft?.editor }
     private(set) var tool: Tool = .pen
@@ -107,6 +108,100 @@ final class InkCanvas: NSView {
         addCursorRect(bounds, cursor: tool == .text ? .iBeam : .crosshair)
     }
 
+    private var widthPreferenceKey: String { tool == .rectangle ? "rectangleWidth" : "penWidth" }
+
+    private var strokeWidth: Int {
+        let saved = UserDefaults.standard.integer(forKey: widthPreferenceKey)
+        return InkStyleMenu.widths.contains(saved) ? saved : 4
+    }
+
+    private var defaultTextStyle: InkText.Style {
+        let defaults = UserDefaults.standard
+        let size = defaults.integer(forKey: "annotationTextSize")
+        let weight = defaults.string(forKey: "annotationTextWeight").flatMap(InkText.Style.Weight.init(rawValue:))
+        return InkText.Style(color: palette.selected, size: InkStyleMenu.fontSizes.contains(size) ? size : 22,
+                             weight: weight ?? .semibold, italic: defaults.bool(forKey: "annotationTextItalic"))
+    }
+
+    private func markIndex(at point: CGPoint) -> Int? {
+        marks.indices.reversed().first { index in
+            let mark = marks[index]
+            if let stroke = mark as? InkStroke { return stroke.contains(point) }
+            return mark.bounds.contains(point)
+        }
+    }
+
+    override func menu(for event: NSEvent) -> NSMenu? {
+        if let index = markIndex(at: convert(event.locationInWindow, from: nil)) {
+            if let text = marks[index] as? InkText {
+                return InkStyleMenu.text(text.style) { [weak self] style in
+                    self?.restyleText(at: index, to: style)
+                }
+            }
+            if let stroke = marks[index] as? InkStroke {
+                return InkStyleMenu.stroke(stroke.style) { [weak self, weak stroke] style in
+                    if let stroke { self?.restyleStroke(stroke, to: style) }
+                }
+            }
+        }
+        if tool == .text {
+            return InkStyleMenu.text(defaultTextStyle) { [weak self] style in
+                self?.storeTextStyle(style)
+            }
+        }
+        if tool == .laser { return super.menu(for: event) }
+        let key = widthPreferenceKey
+        return InkStyleMenu.stroke(InkStroke.Style(color: palette.selected, width: strokeWidth)) { [weak self] style in
+            UserDefaults.standard.set(style.width, forKey: key)
+            self?.palette.select(style.color)
+        }
+    }
+
+    private func restyleStroke(_ stroke: InkStroke, to style: InkStroke.Style) {
+        guard stroke.style != style else { return }
+        finishLiveInk()
+        history.append(.restyleStroke(stroke, previous: stroke.style))
+        stroke.style = style
+        setNeedsDisplay(stroke.bounds)
+    }
+
+    private func restyleText(at index: Int, to style: InkText.Style) {
+        guard marks.indices.contains(index), let original = marks[index] as? InkText,
+              original.style != style, let updated = original.restyled(style, within: bounds) else { return }
+        finishTextDrag()
+        history.append(.replaceText(index: index, previous: original))
+        marks[index] = updated
+        setNeedsDisplay(original.bounds.union(updated.bounds).insetBy(dx: -1, dy: -1))
+    }
+
+    private func storeTextStyle(_ style: InkText.Style) {
+        let defaults = UserDefaults.standard
+        defaults.set(style.size, forKey: "annotationTextSize")
+        defaults.set(style.weight.rawValue, forKey: "annotationTextWeight")
+        defaults.set(style.italic, forKey: "annotationTextItalic")
+        palette.select(style.color)
+    }
+
+    func textView(_ view: NSTextView, menu: NSMenu, for event: NSEvent, at charIndex: Int) -> NSMenu? {
+        guard let draft = textDraft, draft.editor === view else { return menu }
+        if !menu.items.isEmpty { menu.addItem(.separator()) }
+        return InkStyleMenu.text(draft.style, in: menu) { [weak self, weak view] style in
+            guard let self, let view, self.textDraft?.editor === view else { return }
+            self.textDraft?.style = style
+            self.applyTextStyle(style, to: view)
+        }
+    }
+
+    private func applyTextStyle(_ style: InkText.Style, to editor: NSTextView) {
+        editor.unmarkText()
+        let attributes = style.attributes
+        if let storage = editor.textStorage, storage.length > 0 {
+            storage.addAttributes(attributes, range: NSRange(location: 0, length: storage.length))
+        }
+        editor.typingAttributes = attributes
+        editor.insertionPointColor = style.color.ink
+    }
+
     override func mouseDown(with event: NSEvent) {
         if isLaserActive { moveLaser(with: event); return }
         let point = convert(event.locationInWindow, from: nil)
@@ -123,7 +218,7 @@ final class InkCanvas: NSView {
             }
             return
         }
-        let stroke = InkStroke(start: point, color: palette.selected, isRectangle: tool == .rectangle)
+        let stroke = InkStroke(start: point, color: palette.selected, isRectangle: tool == .rectangle, width: strokeWidth)
         if tool == .pen { record(stroke) }
         live.stroke = stroke
         live.setNeedsDisplay(stroke.tipBounds)
@@ -156,7 +251,7 @@ final class InkCanvas: NSView {
         guard let drag = textDrag else { return }
         textDrag = nil
         if marks[drag.index].bounds.origin != drag.original.bounds.origin {
-            history.append(.moveText(index: drag.index, previous: drag.original))
+            history.append(.replaceText(index: drag.index, previous: drag.original))
         }
     }
 
@@ -180,23 +275,22 @@ final class InkCanvas: NSView {
         editor.isRichText = false
         editor.importsGraphics = false
         editor.allowsUndo = true
-        editor.font = InkText.font
         editor.drawsBackground = false
-        let color = palette.selected
-        editor.textColor = color.ink
-        editor.insertionPointColor = color.ink
+        editor.delegate = self
+        let style = defaultTextStyle
+        applyTextStyle(style, to: editor)
         editor.textContainerInset = InkText.padding
         editor.textContainer?.lineFragmentPadding = 0
         editor.setAccessibilityLabel("화면에 넣을 텍스트")
         addSubview(scroll, positioned: .below, relativeTo: toolbar)
-        textDraft = (scroll, editor, color)
+        textDraft = (scroll, editor, style)
         window?.makeFirstResponder(editor)
     }
 
     func commitText() {
         guard let draft = textDraft else { return }
         draft.editor.unmarkText()
-        if let mark = InkText(text: draft.editor.string, color: draft.color,
+        if let mark = InkText(text: draft.editor.string, style: draft.style,
                               frame: draft.scroll.frame, canvasBounds: bounds) {
             record(mark)
             setNeedsDisplay(mark.bounds.insetBy(dx: -1, dy: -1))
@@ -250,7 +344,8 @@ final class InkCanvas: NSView {
         switch edit {
         case .addMark: marks.removeLast()
         case .clear(let previous): marks = previous
-        case .moveText(let index, let previous): marks[index] = previous
+        case .replaceText(let index, let previous): marks[index] = previous
+        case .restyleStroke(let stroke, let previous): stroke.style = previous
         }
         needsDisplay = true
     }

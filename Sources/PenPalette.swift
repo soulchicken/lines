@@ -20,6 +20,14 @@ enum PenColor: Int, CaseIterable {
         case .yellow: return NSColor(srgbRed: 0.98, green: 0.77, blue: 0.05, alpha: 1)
         }
     }
+
+    var swatch: NSImage {
+        NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
+            self.ink.setFill()
+            NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
+            return true
+        }
+    }
 }
 
 final class PenPalette: NSObject, NSMenuDelegate {
@@ -41,11 +49,7 @@ final class PenPalette: NSObject, NSMenuDelegate {
                                     action: #selector(choose(_:)), keyEquivalent: "")
             item.target = self
             item.tag = color.rawValue
-            item.image = NSImage(size: NSSize(width: 14, height: 14), flipped: false) { rect in
-                color.ink.setFill()
-                NSBezierPath(ovalIn: rect.insetBy(dx: 1, dy: 1)).fill()
-                return true
-            }
+            item.image = color.swatch
         }
         return menu
     }

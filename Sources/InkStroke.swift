@@ -7,7 +7,12 @@ protocol InkMark {
 
 /// An ink mark in progress, either a smoothed path or a rectangle outline.
 final class InkStroke: InkMark {
-    private let color: PenColor
+    struct Style: Equatable {
+        var color: PenColor
+        var width = 4
+    }
+
+    var style: Style
     private let rectangleOrigin: CGPoint?
     private(set) var bounds: CGRect
     private var lastSample: CGPoint
@@ -17,11 +22,11 @@ final class InkStroke: InkMark {
     private var segments = 0
     private var completed: [(path: CGPath, bounds: CGRect)] = []
 
-    // Includes the white outline and antialiasing at the edge.
-    private static let margin: CGFloat = 4
+    // Reserve room for the widest outline, including after restyling a stroke.
+    private static let margin = CGFloat((InkStyleMenu.widths.last ?? 4) / 2 + 2)
 
-    init(start: CGPoint, color: PenColor, isRectangle: Bool = false) {
-        self.color = color
+    init(start: CGPoint, color: PenColor, isRectangle: Bool = false, width: Int = 4) {
+        style = Style(color: color, width: width)
         rectangleOrigin = isRectangle ? start : nil
         bounds = CGRect(origin: start, size: .zero).insetBy(dx: -Self.margin, dy: -Self.margin)
         lastSample = start
@@ -96,12 +101,22 @@ final class InkStroke: InkMark {
         return dirty
     }
 
-    func draw(in context: CGContext, dirtyRect: CGRect) {
-        guard bounds.intersects(dirtyRect) else { return }
+    private var isDot: Bool { rectangleOrigin == nil && anchor == lastSample && completed.isEmpty && segments == 0 }
+
+    func contains(_ point: CGPoint) -> Bool {
+        let width = CGFloat(style.width) + 8
+        let hitArea = CGRect(origin: point, size: .zero).insetBy(dx: -width / 2, dy: -width / 2)
+        guard bounds.intersects(hitArea) else { return false }
+        if isDot { return hypot(point.x - lastSample.x, point.y - lastSample.y) <= width / 2 }
+        let outline = visiblePath(in: hitArea).copy(strokingWithWidth: width, lineCap: .round,
+                                                    lineJoin: .round, miterLimit: 1)
+        return outline.contains(point)
+    }
+
+    private func visiblePath(in dirtyRect: CGRect) -> CGPath {
         if let rectangleOrigin {
             let rect = rectangle(from: rectangleOrigin, to: lastSample)
-            if !rect.isEmpty { stroke(CGPath(rect: rect, transform: nil), in: context) }
-            return
+            return rect.isEmpty ? CGMutablePath() : CGPath(rect: rect, transform: nil)
         }
         let visible = CGMutablePath()
         for piece in completed where piece.bounds.intersects(dirtyRect) {
@@ -111,29 +126,36 @@ final class InkStroke: InkMark {
             visible.addPath(path)
         }
         if tipBounds.intersects(dirtyRect) {
-            if anchor == lastSample && completed.isEmpty && segments == 0 {
-                context.setFillColor(NSColor.white.withAlphaComponent(0.9).cgColor)
-                context.fillEllipse(in: CGRect(origin: lastSample, size: .zero).insetBy(dx: -3, dy: -3))
-                context.setFillColor(color.ink.cgColor)
-                context.fillEllipse(in: CGRect(origin: lastSample, size: .zero).insetBy(dx: -2, dy: -2))
-                return
-            }
             visible.move(to: anchor)
             visible.addQuadCurve(to: lastSample, control: startControl)
         }
-        guard !visible.isEmpty else { return }
-        stroke(visible, in: context)
+        return visible
+    }
+
+    func draw(in context: CGContext, dirtyRect: CGRect) {
+        guard bounds.intersects(dirtyRect) else { return }
+        if isDot {
+            let center = CGRect(origin: lastSample, size: .zero)
+            let radius = CGFloat(style.width) / 2
+            context.setFillColor(NSColor.white.withAlphaComponent(0.9).cgColor)
+            context.fillEllipse(in: center.insetBy(dx: -radius - 1, dy: -radius - 1))
+            context.setFillColor(style.color.ink.cgColor)
+            context.fillEllipse(in: center.insetBy(dx: -radius, dy: -radius))
+            return
+        }
+        let path = visiblePath(in: dirtyRect)
+        if !path.isEmpty { stroke(path, in: context) }
     }
 
     private func stroke(_ path: CGPath, in context: CGContext) {
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        context.setLineWidth(6)
+        context.setLineWidth(CGFloat(style.width + 2))
         context.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
         context.addPath(path)
         context.strokePath()
-        context.setLineWidth(4)
-        context.setStrokeColor(color.ink.cgColor)
+        context.setLineWidth(CGFloat(style.width))
+        context.setStrokeColor(style.color.ink.cgColor)
         context.addPath(path)
         context.strokePath()
     }

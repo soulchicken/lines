@@ -1,21 +1,52 @@
 import AppKit
 
 struct InkText: InkMark {
-    static let font = NSFont.systemFont(ofSize: 22, weight: .semibold)
+    struct Style: Equatable {
+        enum Weight: String, CaseIterable {
+            case regular, semibold, bold
+
+            var title: String {
+                switch self {
+                case .regular: return "보통"
+                case .semibold: return "약간 굵게"
+                case .bold: return "굵게"
+                }
+            }
+
+            var fontWeight: NSFont.Weight {
+                switch self {
+                case .regular: return .regular
+                case .semibold: return .semibold
+                case .bold: return .bold
+                }
+            }
+        }
+
+        var color: PenColor
+        var size = 22
+        var weight: Weight = .semibold
+        var italic = false
+
+        var attributes: [NSAttributedString.Key: Any] {
+            let paragraph = NSMutableParagraphStyle()
+            paragraph.lineBreakMode = .byWordWrapping
+            return [.font: NSFont.systemFont(ofSize: CGFloat(size), weight: weight.fontWeight),
+                    .foregroundColor: color.ink, .paragraphStyle: paragraph, .obliqueness: italic ? 0.2 : 0]
+        }
+    }
+
     static let padding = CGSize(width: 10, height: 7)
 
     private(set) var bounds: CGRect
+    let style: Style
     private let content: NSAttributedString
     private var textFrame: CGRect
     private static let options: NSString.DrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
 
-    init?(text: String, color: PenColor, frame: CGRect, canvasBounds: CGRect) {
+    init?(text: String, style: Style, frame: CGRect, canvasBounds: CGRect) {
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
-        let style = NSMutableParagraphStyle()
-        style.lineBreakMode = .byWordWrapping
-        let content = NSAttributedString(string: text, attributes: [
-            .font: Self.font, .foregroundColor: color.ink, .paragraphStyle: style
-        ])
+        self.style = style
+        let content = NSAttributedString(string: text, attributes: style.attributes)
         let textWidth = frame.width - 2 * Self.padding.width
         let measured = content.boundingRect(with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
                                             options: Self.options)
@@ -26,6 +57,13 @@ struct InkText: InkMark {
         textFrame = CGRect(x: frame.minX + Self.padding.width, y: bottom + Self.padding.height,
                            width: textWidth, height: height - 2 * Self.padding.height)
         self.content = content
+    }
+
+    func restyled(_ style: Style, within canvas: CGRect) -> InkText? {
+        let frame = CGRect(x: bounds.minX, y: bounds.minY,
+                           width: textFrame.width + 2 * Self.padding.width, height: bounds.height)
+        return InkText(text: content.string, style: style, frame: frame, canvasBounds: canvas)?
+            .moved(dx: 0, dy: 0, within: canvas)
     }
 
     func moved(dx: CGFloat, dy: CGFloat, within canvas: CGRect) -> InkText {
