@@ -58,6 +58,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
         }
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         toolbar.onSelectTool = { [weak self] in self?.selectTool($0) }
+        toolbar.makeColorMenu = { [weak self] in self?.toolColorMenu(for: $0) }
         addSubview(toolbar)
         NSLayoutConstraint.activate([
             toolbar.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -154,6 +155,28 @@ final class InkCanvas: NSView, NSTextViewDelegate {
         return InkStyleMenu.stroke(InkStroke.Style(color: palette.selected, width: strokeWidth)) { [weak self] style in
             UserDefaults.standard.set(style.width, forKey: key)
             self?.palette.select(style.color)
+        }
+    }
+
+    private func toolColorMenu(for tool: Tool) -> NSMenu {
+        switch tool {
+        case .pen, .rectangle:
+            return palette.makeMenu()
+        case .text:
+            return InkStyleMenu.colors(selected: textDraft?.style.color ?? palette.selected) { [weak self] color in
+                guard let self else { return }
+                if let draft = self.textDraft {
+                    var style = draft.style
+                    style.color = color
+                    self.textDraft?.style = style
+                    self.applyTextStyle(style, to: draft.editor)
+                }
+                self.palette.select(color)
+            }
+        case .laser:
+            return InkStyleMenu.colors(selected: laser.color) { [weak self] color in
+                self?.laser.color = color
+            }
         }
     }
 

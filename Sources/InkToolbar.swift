@@ -11,6 +11,7 @@ final class InkToolbar: NSStackView {
     private let finish = NSButton()
     private var selectedTool: InkCanvas.Tool = .pen
     var onSelectTool: ((InkCanvas.Tool) -> Void)?
+    var makeColorMenu: ((InkCanvas.Tool) -> NSMenu?)?
     var onAction: ((ShortcutAction) -> Void)?
 
     init(palette: PenPalette) {
@@ -31,7 +32,7 @@ final class InkToolbar: NSStackView {
         add(pen, "펜", "pencil.tip", #selector(choosePen))
         add(rectangle, "사각형", "rectangle", #selector(chooseRectangle))
         add(text, "텍스트", "textformat", #selector(chooseText))
-        add(laser, "레이저", "scope", #selector(toggleLaser))
+        add(laser, "레이저", "scope", #selector(chooseLaser))
         let divider = NSBox()
         divider.boxType = .separator
         addArrangedSubview(divider)
@@ -71,31 +72,27 @@ final class InkToolbar: NSStackView {
                 ? NSColor.white.withAlphaComponent(0.16).cgColor : nil
         }
         pen.toolTip = tool == .pen ? "펜 색상 선택" : "펜으로 전환"
-        rectangle.toolTip = "드래그하여 사각형 그리기"
-        text.toolTip = "빈 곳을 클릭해 입력하거나 기존 글을 드래그해 이동"
-        laser.toolTip = "펜 / 레이저 전환 (" + shortcuts[.laser].label + ")"
+        rectangle.toolTip = tool == .rectangle ? "사각형 색상 선택" : "드래그하여 사각형 그리기"
+        text.toolTip = tool == .text ? "텍스트 색상 선택" : "빈 곳을 클릭해 입력하거나 기존 글을 드래그해 이동"
+        laser.toolTip = tool == .laser ? "레이저 색상 선택" : "레이저로 전환 (" + shortcuts[.laser].label + ")"
         capture.toolTip = "필기를 포함한 PNG 저장 (" + shortcuts[.capture].label + ")"
         undo.toolTip = "실행 취소 (" + shortcuts[.undo].label + ")"
         finish.toolTip = "필기 마치기 (" + shortcuts[.finish].label + ")"
     }
 
-    @objc private func choosePen() {
-        if selectedTool != .pen { onSelectTool?(.pen); return }
-        pen.state = .on
-        palette.makeMenu().popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: pen)
+    private func choose(_ tool: InkCanvas.Tool, button: NSButton) {
+        if selectedTool != tool {
+            onSelectTool?(tool)
+            return
+        }
+        button.state = .on
+        makeColorMenu?(tool)?.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: button)
     }
 
-    @objc private func chooseRectangle() {
-        rectangle.state = .on
-        onSelectTool?(.rectangle)
-    }
-
-    @objc private func chooseText() {
-        text.state = .on
-        onSelectTool?(.text)
-    }
-
-    @objc private func toggleLaser() { onAction?(.laser) }
+    @objc private func choosePen() { choose(.pen, button: pen) }
+    @objc private func chooseRectangle() { choose(.rectangle, button: rectangle) }
+    @objc private func chooseText() { choose(.text, button: text) }
+    @objc private func chooseLaser() { choose(.laser, button: laser) }
     @objc private func takeCapture() { onAction?(.capture) }
     @objc private func undoEdit() { onAction?(.undo) }
     @objc private func finishInk() { onAction?(.finish) }

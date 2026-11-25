@@ -12,6 +12,12 @@ final class LaserPointerView: NSView {
     private var paintedBounds = CGRect.null
     private let trailLifetime = 0.22
     private let dotLifetime = 0.70
+    var color = PenColor(rawValue: UserDefaults.standard.integer(forKey: "laserColor")) ?? .red {
+        didSet {
+            UserDefaults.standard.set(color.rawValue, forKey: "laserColor")
+            if !paintedBounds.isNull { setNeedsDisplay(paintedBounds) }
+        }
+    }
 
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
@@ -58,22 +64,22 @@ final class LaserPointerView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let head = samples.last, let ctx = NSGraphicsContext.current?.cgContext else { return }
         let now = ProcessInfo.processInfo.systemUptime
-        let red = NSColor(srgbRed: 1, green: 0.11, blue: 0.12, alpha: 1)
+        let ink = color.ink
         ctx.saveGState()
         ctx.setLineCap(.round)
         ctx.setLineWidth(3)
         for (from, to) in zip(samples, samples.dropFirst()) {
             let alpha = max(0, 1 - (now - from.time) / trailLifetime)
-            ctx.setStrokeColor(red.withAlphaComponent(0.65 * alpha).cgColor)
+            ctx.setStrokeColor(ink.withAlphaComponent(0.65 * alpha).cgColor)
             ctx.move(to: from.point)
             ctx.addLine(to: to.point)
             ctx.strokePath()
         }
         ctx.setAlpha(min(1, max(0, (dotLifetime - (now - head.time)) / 0.35)))
         let center = CGRect(origin: head.point, size: .zero)
-        ctx.setFillColor(red.withAlphaComponent(0.22).cgColor)
+        ctx.setFillColor(ink.withAlphaComponent(0.22).cgColor)
         ctx.fillEllipse(in: center.insetBy(dx: -9, dy: -9))
-        ctx.setFillColor(red.cgColor)
+        ctx.setFillColor(ink.cgColor)
         ctx.fillEllipse(in: center.insetBy(dx: -5, dy: -5))
         ctx.setFillColor(NSColor.white.cgColor)
         ctx.fillEllipse(in: center.insetBy(dx: -2, dy: -2))
