@@ -2,6 +2,10 @@
 
 Lines는 강의 자료 위에 잠깐 필기한 뒤 발표로 돌아가는 macOS 메뉴 막대 앱이다. 사용법과 단축키는 `README.md`에 있다.
 
+## 커밋 메시지
+
+Conventional Commits 형식을 사용한다. `feat`, `fix`, `docs`처럼 변경에 맞는 유형 뒤에 콜론과 공백을 쓰고, 제목과 필요한 본문은 한국어로 작성한다. 예시 제목은 `fix: 텍스트 상자 배경을 투명하게 변경`이다.
+
 ## 빌드와 실행
 
 - macOS 14 이상과 Xcode Command Line Tools를 사용한다. 프로젝트 루트에서 `make`를 실행하면 Swift 소스를 컴파일하고 `Lines.app`을 로컬 서명한다.
