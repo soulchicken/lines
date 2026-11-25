@@ -46,6 +46,12 @@ enum InkStyleMenu {
         return menu
     }
 
+    static func addLaserDuration(to menu: NSMenu, selected: LaserPointerView.Duration,
+                                 apply: @escaping (LaserPointerView.Duration) -> Void) {
+        addChoices(to: menu, title: "사라지는 시간", values: LaserPointerView.Duration.allCases,
+                   selected: selected, label: { String(format: "%g초", $0.rawValue) }, apply: apply)
+    }
+
     private static func addColors(to menu: NSMenu, selected: PenColor, apply: @escaping (PenColor) -> Void) {
         let item = NSMenuItem(title: "색상", action: nil, keyEquivalent: "")
         item.submenu = colors(selected: selected, apply: apply)

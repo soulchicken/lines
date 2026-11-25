@@ -139,7 +139,18 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     override func menu(for event: NSEvent) -> NSMenu? {
-        if let index = markIndex(at: convert(event.locationInWindow, from: nil)) {
+        let menu = annotationMenu(at: convert(event.locationInWindow, from: nil))
+        guard isLaserActive else { return menu }
+        let laserMenu = menu ?? NSMenu()
+        if !laserMenu.items.isEmpty { laserMenu.addItem(.separator()) }
+        InkStyleMenu.addLaserDuration(to: laserMenu, selected: laser.duration) { [weak self] duration in
+            self?.laser.duration = duration
+        }
+        return laserMenu
+    }
+
+    private func annotationMenu(at point: CGPoint) -> NSMenu? {
+        if let index = markIndex(at: point) {
             if let text = marks[index] as? InkText {
                 return InkStyleMenu.text(text.style) { [weak self] style in
                     self?.restyleText(at: index, to: style)
@@ -156,7 +167,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
                 self?.storeTextStyle(style)
             }
         }
-        if tool == .laser { return super.menu(for: event) }
+        if tool == .laser { return nil }
         let key = widthPreferenceKey
         return InkStyleMenu.stroke(InkStroke.Style(color: palette.selected, width: strokeWidth)) { [weak self] style in
             UserDefaults.standard.set(style.width, forKey: key)

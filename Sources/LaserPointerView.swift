@@ -2,6 +2,14 @@ import AppKit
 
 /// Short-lived presentation marks, separate from the canvas's editable ink.
 final class LaserPointerView: NSView {
+    enum Duration: TimeInterval, CaseIterable {
+        case short = 0.7
+        case standard = 1.4
+        case twoSeconds = 2
+        case threeSeconds = 3
+        case fiveSeconds = 5
+    }
+
     private struct Sample {
         let point: CGPoint
         let time: TimeInterval
@@ -10,8 +18,15 @@ final class LaserPointerView: NSView {
     private var samples: [Sample] = []
     private var timer: Timer?
     private var paintedBounds = CGRect.null
-    private let trailLifetime = 0.22
-    private let dotLifetime = 0.70
+    var duration = Duration(rawValue: UserDefaults.standard.double(forKey: "laserDuration")) ?? .standard {
+        didSet {
+            UserDefaults.standard.set(duration.rawValue, forKey: "laserDuration")
+            refresh(at: ProcessInfo.processInfo.systemUptime)
+        }
+    }
+
+    private var dotLifetime: TimeInterval { duration.rawValue }
+    private var trailLifetime: TimeInterval { dotLifetime * (0.22 / 0.7) }
     var color = PenColor(rawValue: UserDefaults.standard.integer(forKey: "laserColor")) ?? .red {
         didSet {
             UserDefaults.standard.set(color.rawValue, forKey: "laserColor")
@@ -75,7 +90,7 @@ final class LaserPointerView: NSView {
             ctx.addLine(to: to.point)
             ctx.strokePath()
         }
-        ctx.setAlpha(min(1, max(0, (dotLifetime - (now - head.time)) / 0.35)))
+        ctx.setAlpha(min(1, max(0, (dotLifetime - (now - head.time)) / (dotLifetime / 2))))
         let center = CGRect(origin: head.point, size: .zero)
         ctx.setFillColor(ink.withAlphaComponent(0.22).cgColor)
         ctx.fillEllipse(in: center.insetBy(dx: -9, dy: -9))

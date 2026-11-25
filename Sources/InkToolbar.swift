@@ -77,7 +77,7 @@ final class InkToolbar: NSStackView {
         line.toolTip = "직선 선택 (" + shortcuts[.line].label + ") · ⌥를 누른 채 드래그하면 화살표"
         rectangle.toolTip = "사각형 선택 (" + shortcuts[.rectangle].label + ")"
         text.toolTip = "텍스트 선택 (" + shortcuts[.text].label + ") · 클릭하여 입력하거나 기존 글을 드래그해 이동"
-        laser.toolTip = "레이저 선택 (" + shortcuts[.laser].label + ")"
+        laser.toolTip = "레이저 선택 (" + shortcuts[.laser].label + ") · 우클릭하여 사라지는 시간 설정"
         capture.toolTip = "필기를 포함한 PNG 저장 (" + shortcuts[.capture].label + ")"
         undo.toolTip = "실행 취소 (" + shortcuts[.undo].label + ")"
         finish.toolTip = "필기 마치기 (" + shortcuts[.finish].label + ")"
