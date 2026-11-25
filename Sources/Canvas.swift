@@ -12,17 +12,25 @@ private final class LiveInkView: NSView {
 }
 
 final class InkCanvas: NSView {
+    enum Tool {
+        case pen, rectangle, text, laser
+    }
+
     private enum Edit {
-        case addStroke
-        case clear([InkStroke])
+        case addMark
+        case clear([InkMark])
     }
 
     private let palette: PenPalette
-    private var strokes: [InkStroke] = []
+    private var marks: [InkMark] = []
     private var history: [Edit] = []
     private let live = LiveInkView()
     private let laser = LaserPointerView()
-    var isLaserActive: Bool { !laser.isHidden }
+    private var textDraft: (scroll: NSScrollView, editor: NSTextView, color: PenColor)?
+    var textEditor: NSTextView? { textDraft?.editor }
+    private(set) var tool: Tool = .pen
+    var isLaserActive: Bool { tool == .laser }
+    var onToolChange: (() -> Void)?
     let toolbar: InkToolbar
 
     init(palette: PenPalette) {
@@ -40,6 +48,7 @@ final class InkCanvas: NSView {
             addSubview(overlay)
         }
         toolbar.translatesAutoresizingMaskIntoConstraints = false
+        toolbar.onSelectTool = { [weak self] in self?.selectTool($0) }
         addSubview(toolbar)
         NSLayoutConstraint.activate([
             toolbar.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -51,15 +60,22 @@ final class InkCanvas: NSView {
     required init?(coder: NSCoder) { nil }
 
     func toggleLaser() {
-        // Commit any in-progress pen stroke before switching tools.
-        if let dirty = live.stroke?.bounds { setNeedsDisplay(dirty) }
-        discardLiveInk()
+        selectTool(isLaserActive ? .pen : .laser)
+    }
+
+    private func selectTool(_ tool: Tool) {
+        guard self.tool != tool else { return }
+        commitText()
+        finishLiveInk()
+        self.tool = tool
         laser.clear()
-        laser.isHidden.toggle()
+        laser.isHidden = !isLaserActive
         window?.acceptsMouseMovedEvents = isLaserActive
         if isLaserActive, let window {
             displayLaser(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
         }
+        window?.invalidateCursorRects(for: self)
+        onToolChange?()
     }
 
     func moveLaser(with event: NSEvent) {
@@ -79,15 +95,18 @@ final class InkCanvas: NSView {
 
     override func resetCursorRects() {
         super.resetCursorRects()
-        addCursorRect(bounds, cursor: .crosshair)
+        addCursorRect(bounds, cursor: tool == .text ? .iBeam : .crosshair)
     }
 
     override func mouseDown(with event: NSEvent) {
         if isLaserActive { moveLaser(with: event); return }
         let point = convert(event.locationInWindow, from: nil)
-        let stroke = InkStroke(start: point, color: palette.selected)
-        strokes.append(stroke)
-        history.append(.addStroke)
+        if tool == .text {
+            if textDraft == nil { beginText(at: point) } else { commitText() }
+            return
+        }
+        let stroke = InkStroke(start: point, color: palette.selected, isRectangle: tool == .rectangle)
+        if tool == .pen { record(stroke) }
         live.stroke = stroke
         live.setNeedsDisplay(stroke.tipBounds)
     }
@@ -101,7 +120,63 @@ final class InkCanvas: NSView {
     override func mouseUp(with event: NSEvent) {
         if isLaserActive { moveLaser(with: event); return }
         mouseDragged(with: event)
-        if let dirty = live.stroke?.bounds { setNeedsDisplay(dirty) }
+        finishLiveInk()
+    }
+
+    private func record(_ mark: InkMark) {
+        marks.append(mark)
+        history.append(.addMark)
+    }
+
+    private func beginText(at point: CGPoint) {
+        let size = CGSize(width: min(340, bounds.width - 16), height: min(104, bounds.height - 16))
+        guard size.width > 20, size.height > 20 else { return }
+        let frame = CGRect(x: min(max(point.x, bounds.minX + 8), bounds.maxX - size.width - 8),
+                           y: min(max(point.y - size.height, bounds.minY + 8), bounds.maxY - size.height - 8),
+                           width: size.width, height: size.height)
+        let scroll = NSTextView.scrollableTextView()
+        guard let editor = scroll.documentView as? NSTextView else { return }
+        scroll.frame = frame
+        scroll.appearance = NSAppearance(named: .aqua)
+        scroll.borderType = .lineBorder
+        scroll.hasHorizontalScroller = false
+        editor.isRichText = false
+        editor.importsGraphics = false
+        editor.allowsUndo = true
+        editor.font = InkText.font
+        editor.backgroundColor = InkText.background
+        let color = palette.selected
+        editor.textColor = color.ink
+        editor.textContainerInset = InkText.padding
+        editor.textContainer?.lineFragmentPadding = 0
+        editor.setAccessibilityLabel("화면에 넣을 텍스트")
+        addSubview(scroll, positioned: .below, relativeTo: toolbar)
+        textDraft = (scroll, editor, color)
+        window?.makeFirstResponder(editor)
+    }
+
+    func commitText() {
+        guard let draft = textDraft else { return }
+        draft.editor.unmarkText()
+        if let mark = InkText(text: draft.editor.string, color: draft.color,
+                              frame: draft.scroll.frame, canvasBounds: bounds) {
+            record(mark)
+            setNeedsDisplay(mark.bounds.insetBy(dx: -1, dy: -1))
+        }
+        cancelText()
+    }
+
+    func cancelText() {
+        guard let draft = textDraft else { return }
+        textDraft = nil
+        window?.makeFirstResponder(self)
+        draft.scroll.removeFromSuperview()
+    }
+
+    private func finishLiveInk() {
+        guard let stroke = live.stroke else { return }
+        if tool == .rectangle && stroke.hasInk { record(stroke) }
+        setNeedsDisplay(stroke.bounds)
         discardLiveInk()
     }
 
@@ -111,33 +186,41 @@ final class InkCanvas: NSView {
     }
 
     func snapshotInk(scale: CGFloat) throws -> CGImage? {
-        guard !strokes.isEmpty else { return nil }
+        let rectangle = tool == .rectangle ? live.stroke : nil
+        guard !marks.isEmpty || rectangle?.hasInk == true else { return nil }
         let width = Int((bounds.width * scale).rounded())
         let height = Int((bounds.height * scale).rounded())
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
                                       bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw CaptureError.imageUnavailable }
         context.scaleBy(x: scale, y: scale)
-        for stroke in strokes { stroke.draw(in: context, dirtyRect: bounds) }
+        for mark in marks { mark.draw(in: context, dirtyRect: bounds) }
+        rectangle?.draw(in: context, dirtyRect: bounds)
         guard let ink = context.makeImage() else { throw CaptureError.imageUnavailable }
         return ink
     }
 
     func undoLastEdit() {
+        if textDraft != nil { cancelText(); return }
+        if tool == .rectangle, let rectangle = live.stroke {
+            discardLiveInk()
+            if rectangle.hasInk { return }
+        }
         guard let edit = history.popLast() else { return }
         discardLiveInk()
         switch edit {
-        case .addStroke: strokes.removeLast()
-        case .clear(let previous): strokes = previous
+        case .addMark: marks.removeLast()
+        case .clear(let previous): marks = previous
         }
         needsDisplay = true
     }
 
     func clear() {
-        guard !strokes.isEmpty else { return }
-        history.append(.clear(strokes))
-        strokes.removeAll()
+        cancelText()
         discardLiveInk()
+        guard !marks.isEmpty else { return }
+        history.append(.clear(marks))
+        marks.removeAll()
         needsDisplay = true
     }
 
@@ -147,7 +230,10 @@ final class InkCanvas: NSView {
         dirtyRect.fill(using: .copy)
         if let context = NSGraphicsContext.current?.cgContext {
             context.saveGState()
-            for stroke in strokes where stroke !== live.stroke { stroke.draw(in: context, dirtyRect: dirtyRect) }
+            for mark in marks {
+                if let stroke = mark as? InkStroke, stroke === live.stroke { continue }
+                mark.draw(in: context, dirtyRect: dirtyRect)
+            }
             context.restoreGState()
         }
     }

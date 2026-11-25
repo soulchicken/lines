@@ -1,8 +1,14 @@
 import AppKit
 
-/// An incremental smoothed path with a short live segment to the latest input.
-final class InkStroke {
+protocol InkMark {
+    var bounds: CGRect { get }
+    func draw(in context: CGContext, dirtyRect: CGRect)
+}
+
+/// An ink mark in progress, either a smoothed path or a rectangle outline.
+final class InkStroke: InkMark {
     private let color: PenColor
+    private let rectangleOrigin: CGPoint?
     private(set) var bounds: CGRect
     private var lastSample: CGPoint
     private var anchor: CGPoint
@@ -14,8 +20,9 @@ final class InkStroke {
     // Includes the white outline and antialiasing at the edge.
     private static let margin: CGFloat = 4
 
-    init(start: CGPoint, color: PenColor) {
+    init(start: CGPoint, color: PenColor, isRectangle: Bool = false) {
         self.color = color
+        rectangleOrigin = isRectangle ? start : nil
         bounds = CGRect(origin: start, size: .zero).insetBy(dx: -Self.margin, dy: -Self.margin)
         lastSample = start
         anchor = start
@@ -23,14 +30,29 @@ final class InkStroke {
         path.move(to: start)
     }
 
-    private func extent(_ a: CGPoint, _ b: CGPoint) -> CGRect {
+    private func rectangle(from a: CGPoint, to b: CGPoint) -> CGRect {
         CGRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(b.x - a.x), height: abs(b.y - a.y))
-            .insetBy(dx: -Self.margin, dy: -Self.margin)
+    }
+
+    private func extent(_ a: CGPoint, _ b: CGPoint) -> CGRect {
+        rectangle(from: a, to: b).insetBy(dx: -Self.margin, dy: -Self.margin)
+    }
+
+    var hasInk: Bool {
+        guard let rectangleOrigin else { return true }
+        return !rectangle(from: rectangleOrigin, to: lastSample).isEmpty
     }
 
     var tipBounds: CGRect { extent(anchor, lastSample).union(extent(anchor, startControl)) }
 
     func append(_ point: CGPoint) -> CGRect? {
+        if let rectangleOrigin {
+            guard point != lastSample else { return nil }
+            let dirty = bounds
+            lastSample = point
+            bounds = extent(rectangleOrigin, point)
+            return dirty.union(bounds)
+        }
         let dx = point.x - lastSample.x
         let dy = point.y - lastSample.y
         let distance = hypot(dx, dy)
@@ -76,6 +98,11 @@ final class InkStroke {
 
     func draw(in context: CGContext, dirtyRect: CGRect) {
         guard bounds.intersects(dirtyRect) else { return }
+        if let rectangleOrigin {
+            let rect = rectangle(from: rectangleOrigin, to: lastSample)
+            if !rect.isEmpty { stroke(CGPath(rect: rect, transform: nil), in: context) }
+            return
+        }
         let visible = CGMutablePath()
         for piece in completed where piece.bounds.intersects(dirtyRect) {
             visible.addPath(piece.path)
@@ -95,15 +122,19 @@ final class InkStroke {
             visible.addQuadCurve(to: lastSample, control: startControl)
         }
         guard !visible.isEmpty else { return }
+        stroke(visible, in: context)
+    }
+
+    private func stroke(_ path: CGPath, in context: CGContext) {
         context.setLineCap(.round)
         context.setLineJoin(.round)
         context.setLineWidth(6)
         context.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
-        context.addPath(visible)
+        context.addPath(path)
         context.strokePath()
         context.setLineWidth(4)
         context.setStrokeColor(color.ink.cgColor)
-        context.addPath(visible)
+        context.addPath(path)
         context.strokePath()
     }
 }

@@ -57,6 +57,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         if inSettings, settings?.handle(event) == true { return true }
         guard inSettings || (window === panel && panel?.isVisible == true),
               let key = KeyBinding(event: event) else { return false }
+        if let canvas = panel?.canvas, let editor = canvas.textEditor, window.firstResponder === editor {
+            // Leave typing, text editing and input method composition to AppKit.
+            guard !editor.hasMarkedText() else { return false }
+            if key.sameKeys(as: KeyBinding(kVK_Escape, "Esc")) {
+                canvas.cancelText()
+                return true
+            }
+            if key.modifiers == UInt32(cmdKey), key.code == UInt32(kVK_Return) || key.code == UInt32(kVK_ANSI_KeypadEnter) {
+                canvas.commitText()
+                return true
+            }
+            if key.opensSettings { openSettings(); return true }
+            if key.modifiers & UInt32(cmdKey) != 0, shortcuts.action(for: key) == .capture {
+                captureScreen()
+                return true
+            }
+            return false
+        }
         if key.opensSettings {
             openSettings()
             return true
@@ -76,6 +94,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     @objc private func openSettings() {
         guard !isCapturing else { return }
+        panel?.canvas.commitText()
         if settings == nil {
             let controller = ShortcutSettings(binding: { [unowned self] in self.shortcuts[$0] },
                                               assign: { [unowned self] in self.assign($0, $1) })
@@ -131,6 +150,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         overlay.onFinish = { [weak self] in self?.finishInk() }
         overlay.onToggleLaser = { [weak self] in self?.toggleLaser() }
         overlay.onCapture = { [weak self] in self?.captureScreen() }
+        overlay.canvas.onToolChange = { [weak self] in self?.updateStatus() }
         panel = overlay
         updateStatus()
         showInkPanel()
@@ -144,7 +164,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             showInkPanel()
         }
         panel?.canvas.toggleLaser()
-        updateStatus()
     }
 
     @objc private func captureScreen() {
@@ -153,6 +172,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
               let display = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
         else { return }
         isCapturing = true
+        panel?.canvas.commitText()
         let resumeInk = panel?.isVisible == true
         Task { @MainActor in
             defer {
@@ -209,7 +229,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         palette.shortcutLabels = [.red: shortcuts[.red].label, .blue: shortcuts[.blue].label,
                                   .green: shortcuts[.green].label, .yellow: shortcuts[.yellow].label]
         if let canvas = panel?.canvas {
-            canvas.toolbar.refresh(isLaser: canvas.isLaserActive, shortcuts: shortcuts)
+            canvas.toolbar.refresh(tool: canvas.tool, shortcuts: shortcuts)
         }
         statusItem.button?.image = Self.statusImage(active: active)
         statusItem.button?.setAccessibilityLabel("Lines · " + label)

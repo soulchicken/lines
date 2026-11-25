@@ -1,0 +1,41 @@
+import AppKit
+
+struct InkText: InkMark {
+    static let font = NSFont.systemFont(ofSize: 22, weight: .semibold)
+    static let padding = CGSize(width: 10, height: 7)
+    static let background = NSColor(white: 1, alpha: 0.96)
+
+    let bounds: CGRect
+    private let content: NSAttributedString
+    private let textFrame: CGRect
+    private static let options: NSString.DrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
+
+    init?(text: String, color: PenColor, frame: CGRect, canvasBounds: CGRect) {
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        let style = NSMutableParagraphStyle()
+        style.lineBreakMode = .byWordWrapping
+        let content = NSAttributedString(string: text, attributes: [
+            .font: Self.font, .foregroundColor: color.ink, .paragraphStyle: style
+        ])
+        let textWidth = frame.width - 2 * Self.padding.width
+        let measured = content.boundingRect(with: CGSize(width: textWidth, height: .greatestFiniteMagnitude),
+                                            options: Self.options)
+        let height = min(ceil(measured.height) + 2 * Self.padding.height, canvasBounds.height - 16)
+        let bottom = max(canvasBounds.minY + 8, frame.maxY - height)
+        bounds = CGRect(x: frame.minX, y: bottom, width: min(frame.width, ceil(measured.width) + 2 * Self.padding.width),
+                        height: height)
+        textFrame = CGRect(x: frame.minX + Self.padding.width, y: bottom + Self.padding.height,
+                           width: textWidth, height: height - 2 * Self.padding.height)
+        self.content = content
+    }
+
+    func draw(in context: CGContext, dirtyRect: CGRect) {
+        guard bounds.intersects(dirtyRect) else { return }
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
+        Self.background.setFill()
+        NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
+        content.draw(with: textFrame, options: Self.options)
+        NSGraphicsContext.restoreGraphicsState()
+    }
+}
