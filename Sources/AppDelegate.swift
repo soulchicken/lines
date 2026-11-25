@@ -227,6 +227,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                                   .green: shortcuts[.green].label, .yellow: shortcuts[.yellow].label]
         if let canvas = panel?.canvas {
             canvas.toolbar.refresh(tool: canvas.tool, shortcuts: shortcuts)
+            canvas.refreshToolbarColor()
         }
         statusItem.button?.image = Self.statusImage(active: active)
         statusItem.button?.setAccessibilityLabel("Lines · " + label)

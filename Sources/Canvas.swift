@@ -44,7 +44,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
 
     init(palette: PenPalette) {
         self.palette = palette
-        toolbar = InkToolbar(palette: palette)
+        toolbar = InkToolbar()
         super.init(frame: .zero)
         wantsLayer = true
         layerContentsRedrawPolicy = .onSetNeedsDisplay
@@ -65,6 +65,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
             toolbar.topAnchor.constraint(equalTo: topAnchor, constant: 52)
         ])
         menu = palette.makeMenu()
+        refreshToolbarColor()
     }
 
     required init?(coder: NSCoder) { nil }
@@ -193,8 +194,14 @@ final class InkCanvas: NSView, NSTextViewDelegate {
         case .laser:
             return InkStyleMenu.colors(selected: laser.color) { [weak self] color in
                 self?.laser.color = color
+                self?.refreshToolbarColor()
             }
         }
+    }
+
+    func refreshToolbarColor() {
+        let color = isLaserActive ? laser.color : textDraft?.style.color ?? palette.selected
+        toolbar.showColor(color, isLaser: isLaserActive)
     }
 
     private func restyleStroke(_ stroke: InkStroke, to style: InkStroke.Style) {
@@ -229,6 +236,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
             guard let self, let view, self.textDraft?.editor === view else { return }
             self.textDraft?.style = style
             self.applyTextStyle(style, to: view)
+            self.refreshToolbarColor()
         }
     }
 
@@ -353,6 +361,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     func cancelText() {
         guard let draft = textDraft else { return }
         textDraft = nil
+        refreshToolbarColor()
         window?.makeFirstResponder(self)
         draft.scroll.removeFromSuperview()
     }

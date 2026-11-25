@@ -1,12 +1,12 @@
 import AppKit
 
 final class InkToolbar: NSStackView {
-    private let palette: PenPalette
     private let pen = NSButton()
     private let line = NSButton()
     private let laser = NSButton()
     private let rectangle = NSButton()
     private let text = NSButton()
+    private let color = NSButton()
     private let capture = NSButton()
     private let undo = NSButton()
     private let finish = NSButton()
@@ -15,8 +15,7 @@ final class InkToolbar: NSStackView {
     var makeColorMenu: ((InkCanvas.Tool) -> NSMenu?)?
     var onAction: ((ShortcutAction) -> Void)?
 
-    init(palette: PenPalette) {
-        self.palette = palette
+    init() {
         super.init(frame: .zero)
         appearance = NSAppearance(named: .darkAqua)
         orientation = .horizontal
@@ -30,6 +29,10 @@ final class InkToolbar: NSStackView {
         layer?.borderColor = NSColor.white.withAlphaComponent(0.14).cgColor
         setAccessibilityLabel("필기 도구")
 
+        add(color, "", nil, #selector(chooseColor))
+        color.imagePosition = .imageOnly
+        color.widthAnchor.constraint(greaterThanOrEqualToConstant: 28).isActive = true
+        color.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
         add(pen, "펜", "pencil.tip", #selector(choosePen))
         add(line, "직선", "line.diagonal", #selector(chooseLine))
         add(rectangle, "사각형", "rectangle", #selector(chooseRectangle))
@@ -52,9 +55,11 @@ final class InkToolbar: NSStackView {
 
     required init?(coder: NSCoder) { nil }
 
-    private func add(_ button: NSButton, _ title: String, _ symbol: String, _ action: Selector) {
+    private func add(_ button: NSButton, _ title: String, _ symbol: String?, _ action: Selector) {
         button.title = title
-        button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        if let symbol {
+            button.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
+        }
         button.imagePosition = .imageLeading
         button.bezelStyle = .recessed
         button.showsBorderOnlyWhileMouseInside = true
@@ -67,7 +72,6 @@ final class InkToolbar: NSStackView {
 
     func refresh(tool: InkCanvas.Tool, shortcuts: Shortcuts) {
         selectedTool = tool
-        pen.title = palette.selected.name + " 펜"
         for (button, mode) in [(pen, InkCanvas.Tool.pen), (line, .line), (rectangle, .rectangle), (text, .text), (laser, .laser)] {
             button.state = tool == mode ? .on : .off
             button.layer?.backgroundColor = tool == mode
@@ -83,15 +87,27 @@ final class InkToolbar: NSStackView {
         finish.toolTip = "필기 마치기 (" + shortcuts[.finish].label + ")"
     }
 
+    func showColor(_ selected: PenColor, isLaser: Bool) {
+        color.image = selected.swatch
+        let description = (isLaser ? "레이저 색상" : "필기 색상") + " 변경 · " + selected.name
+        color.toolTip = description
+        color.setAccessibilityLabel(description)
+    }
+
     private func choose(_ tool: InkCanvas.Tool, button: NSButton) {
         if selectedTool != tool {
             onSelectTool?(tool)
             return
         }
         button.state = .on
-        makeColorMenu?(tool)?.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: button)
+        showColorMenu(at: button)
     }
 
+    private func showColorMenu(at button: NSButton) {
+        makeColorMenu?(selectedTool)?.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: button)
+    }
+
+    @objc private func chooseColor() { showColorMenu(at: color) }
     @objc private func choosePen() { choose(.pen, button: pen) }
     @objc private func chooseLine() { choose(.line, button: line) }
     @objc private func chooseRectangle() { choose(.rectangle, button: rectangle) }
