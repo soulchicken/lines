@@ -99,9 +99,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             let controller = ShortcutSettings(binding: { [unowned self] in self.shortcuts[$0] },
                                               assign: { [unowned self] in self.assign($0, $1) })
             controller.reset = { [unowned self] in
-                var defaults = self.shortcuts
-                for action in ShortcutAction.allCases { defaults[action] = action.defaultKey }
-                return self.apply(defaults, retryGlobal: true)
+                self.apply(Shortcuts(loadSaved: false), retryGlobal: true)
             }
             controller.onClose = { [weak self] in self?.showInkPanel() }
             settings = controller

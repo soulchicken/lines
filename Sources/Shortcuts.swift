@@ -21,7 +21,7 @@ enum ShortcutAction: String, CaseIterable {
 
     var defaultKey: KeyBinding {
         switch self {
-        case .toggle: return KeyBinding(kVK_ANSI_D, "D", controlKey | optionKey)
+        case .toggle: return KeyBinding(kVK_ANSI_Grave, "`", optionKey)
         case .undo: return KeyBinding(kVK_ANSI_Z, "Z", cmdKey)
         case .clear: return KeyBinding(kVK_Delete, "Delete")
         case .finish: return KeyBinding(kVK_Escape, "Esc")
@@ -96,19 +96,23 @@ struct KeyBinding: Codable {
 struct Shortcuts {
     private var saved: [String: KeyBinding] = [:]
 
-    init() {
-        if let data = UserDefaults.standard.data(forKey: "shortcuts.v1"),
+    init(loadSaved: Bool = true) {
+        if loadSaved, let data = UserDefaults.standard.data(forKey: "shortcuts.v1"),
            let values = try? JSONDecoder().decode([String: KeyBinding].self, from: data) {
             saved = values
-            // Preserve existing assignments when a new action introduces a default key.
-            for action in [ShortcutAction.capture, .laser] where saved[action.rawValue] == nil {
+            // A new default must not take over a key the user already assigned.
+            for action in [ShortcutAction.toggle, .capture, .laser] where saved[action.rawValue] == nil {
                 let key = action.defaultKey
                 guard saved.values.contains(where: { $0.sameKeys(as: key) }) else { continue }
                 let masks = [cmdKey | shiftKey, cmdKey | optionKey, cmdKey | controlKey,
                              optionKey | shiftKey, controlKey | shiftKey, controlKey | optionKey,
                              cmdKey | shiftKey | optionKey, cmdKey | shiftKey | controlKey,
                              controlKey, optionKey, shiftKey]
-                saved[action.rawValue] = masks.map { KeyBinding(Int(key.code), key.key, $0) }.first { candidate in
+                var alternatives = masks.map { KeyBinding(Int(key.code), key.key, $0) }
+                if action == .toggle {
+                    alternatives.insert(KeyBinding(kVK_ANSI_D, "D", controlKey | optionKey), at: 0)
+                }
+                saved[action.rawValue] = alternatives.first { candidate in
                     !saved.values.contains(where: { $0.sameKeys(as: candidate) })
                 }
             }
