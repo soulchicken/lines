@@ -4,9 +4,9 @@ struct InkText: InkMark {
     static let font = NSFont.systemFont(ofSize: 22, weight: .semibold)
     static let padding = CGSize(width: 10, height: 7)
 
-    let bounds: CGRect
+    private(set) var bounds: CGRect
     private let content: NSAttributedString
-    private let textFrame: CGRect
+    private var textFrame: CGRect
     private static let options: NSString.DrawingOptions = [.usesLineFragmentOrigin, .usesFontLeading]
 
     init?(text: String, color: PenColor, frame: CGRect, canvasBounds: CGRect) {
@@ -26,6 +26,15 @@ struct InkText: InkMark {
         textFrame = CGRect(x: frame.minX + Self.padding.width, y: bottom + Self.padding.height,
                            width: textWidth, height: height - 2 * Self.padding.height)
         self.content = content
+    }
+
+    func moved(dx: CGFloat, dy: CGFloat, within canvas: CGRect) -> InkText {
+        let x = min(max(canvas.minX, bounds.minX + dx), canvas.maxX - bounds.width)
+        let y = min(max(canvas.minY, bounds.minY + dy), canvas.maxY - bounds.height)
+        var moved = self
+        moved.bounds.origin = CGPoint(x: x, y: y)
+        moved.textFrame = textFrame.offsetBy(dx: x - bounds.minX, dy: y - bounds.minY)
+        return moved
     }
 
     func draw(in context: CGContext, dirtyRect: CGRect) {

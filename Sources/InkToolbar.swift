@@ -72,7 +72,7 @@ final class InkToolbar: NSStackView {
         }
         pen.toolTip = tool == .pen ? "펜 색상 선택" : "펜으로 전환"
         rectangle.toolTip = "드래그하여 사각형 그리기"
-        text.toolTip = "화면을 클릭해 입력하고 ⌘↩로 확정"
+        text.toolTip = "빈 곳을 클릭해 입력하거나 기존 글을 드래그해 이동"
         laser.toolTip = "펜 / 레이저 전환 (" + shortcuts[.laser].label + ")"
         capture.toolTip = "필기를 포함한 PNG 저장 (" + shortcuts[.capture].label + ")"
         undo.toolTip = "실행 취소 (" + shortcuts[.undo].label + ")"
