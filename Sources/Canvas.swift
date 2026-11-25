@@ -13,7 +13,7 @@ private final class LiveInkView: NSView {
 
 final class InkCanvas: NSView, NSTextViewDelegate {
     enum Tool {
-        case pen, rectangle, text, laser
+        case pen, line, rectangle, text, laser
     }
 
     private enum Edit {
@@ -109,7 +109,13 @@ final class InkCanvas: NSView, NSTextViewDelegate {
         addCursorRect(bounds, cursor: tool == .text ? .iBeam : .crosshair)
     }
 
-    private var widthPreferenceKey: String { tool == .rectangle ? "rectangleWidth" : "penWidth" }
+    private var widthPreferenceKey: String {
+        switch tool {
+        case .line: return "lineWidth"
+        case .rectangle: return "rectangleWidth"
+        default: return "penWidth"
+        }
+    }
 
     private var strokeWidth: Int {
         let saved = UserDefaults.standard.integer(forKey: widthPreferenceKey)
@@ -160,7 +166,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
 
     private func toolColorMenu(for tool: Tool) -> NSMenu {
         switch tool {
-        case .pen, .rectangle:
+        case .pen, .line, .rectangle:
             return palette.makeMenu()
         case .text:
             return InkStyleMenu.colors(selected: textDraft?.style.color ?? palette.selected) { [weak self] color in
@@ -241,8 +247,14 @@ final class InkCanvas: NSView, NSTextViewDelegate {
             }
             return
         }
-        let stroke = InkStroke(start: point, color: palette.selected, isRectangle: tool == .rectangle, width: strokeWidth)
-        if tool == .pen { record(stroke) }
+        let shape: InkStroke.Shape
+        switch tool {
+        case .line: shape = .line
+        case .rectangle: shape = .rectangle
+        default: shape = .freehand
+        }
+        let stroke = InkStroke(start: point, color: palette.selected, shape: shape, width: strokeWidth)
+        if shape == .freehand { record(stroke) }
         live.stroke = stroke
         live.setNeedsDisplay(stroke.tipBounds)
     }
@@ -260,7 +272,13 @@ final class InkCanvas: NSView, NSTextViewDelegate {
             }
             return
         }
-        if let dirty = live.stroke?.append(point) { live.setNeedsDisplay(dirty) }
+        if let dirty = live.stroke?.append(point, arrow: event.modifierFlags.contains(.option)) {
+            live.setNeedsDisplay(dirty)
+        }
+    }
+
+    func updateArrowPreview(_ modifiers: NSEvent.ModifierFlags) {
+        if let dirty = live.stroke?.updateArrow(modifiers.contains(.option)) { live.setNeedsDisplay(dirty) }
     }
 
     override func mouseUp(with event: NSEvent) {
@@ -330,7 +348,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
 
     private func finishLiveInk() {
         guard let stroke = live.stroke else { return }
-        if tool == .rectangle && stroke.hasInk { record(stroke) }
+        if stroke.shape != .freehand && stroke.hasInk { record(stroke) }
         setNeedsDisplay(stroke.bounds)
         discardLiveInk()
     }
@@ -341,8 +359,8 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     func snapshotInk(scale: CGFloat) throws -> CGImage? {
-        let rectangle = tool == .rectangle ? live.stroke : nil
-        guard !marks.isEmpty || rectangle?.hasInk == true else { return nil }
+        let shape = live.stroke?.shape == .freehand ? nil : live.stroke
+        guard !marks.isEmpty || shape?.hasInk == true else { return nil }
         let width = Int((bounds.width * scale).rounded())
         let height = Int((bounds.height * scale).rounded())
         guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
@@ -350,7 +368,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
                                       bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw CaptureError.imageUnavailable }
         context.scaleBy(x: scale, y: scale)
         for mark in marks { mark.draw(in: context, dirtyRect: bounds) }
-        rectangle?.draw(in: context, dirtyRect: bounds)
+        shape?.draw(in: context, dirtyRect: bounds)
         guard let ink = context.makeImage() else { throw CaptureError.imageUnavailable }
         return ink
     }
@@ -358,9 +376,9 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     func undoLastEdit() {
         if textDraft != nil { cancelText(); return }
         finishTextDrag()
-        if tool == .rectangle, let rectangle = live.stroke {
+        if let shape = live.stroke, shape.shape != .freehand {
             discardLiveInk()
-            if rectangle.hasInk { return }
+            if shape.hasInk { return }
         }
         guard let edit = history.popLast() else { return }
         discardLiveInk()
@@ -440,6 +458,9 @@ final class InkPanel: NSPanel {
         if event.type == .mouseMoved && canvas.isLaserActive {
             canvas.moveLaser(with: event)
             // Allow AppKit to update button hover states and tooltips.
+        }
+        if event.type == .flagsChanged && canvas.tool == .line {
+            canvas.updateArrowPreview(event.modifierFlags)
         }
         super.sendEvent(event)
     }

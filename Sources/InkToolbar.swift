@@ -3,6 +3,7 @@ import AppKit
 final class InkToolbar: NSStackView {
     private let palette: PenPalette
     private let pen = NSButton()
+    private let line = NSButton()
     private let laser = NSButton()
     private let rectangle = NSButton()
     private let text = NSButton()
@@ -30,6 +31,7 @@ final class InkToolbar: NSStackView {
         setAccessibilityLabel("필기 도구")
 
         add(pen, "펜", "pencil.tip", #selector(choosePen))
+        add(line, "직선", "line.diagonal", #selector(chooseLine))
         add(rectangle, "사각형", "rectangle", #selector(chooseRectangle))
         add(text, "텍스트", "textformat", #selector(chooseText))
         add(laser, "레이저", "scope", #selector(chooseLaser))
@@ -41,7 +43,7 @@ final class InkToolbar: NSStackView {
         add(capture, "캡처", "camera", #selector(takeCapture))
         add(undo, "취소", "arrow.uturn.backward", #selector(undoEdit))
         add(finish, "종료", "xmark", #selector(finishInk))
-        for button in [pen, rectangle, text, laser] {
+        for button in [pen, line, rectangle, text, laser] {
             button.setButtonType(.toggle)
             button.wantsLayer = true
             button.layer?.cornerRadius = 8
@@ -66,12 +68,13 @@ final class InkToolbar: NSStackView {
     func refresh(tool: InkCanvas.Tool, shortcuts: Shortcuts) {
         selectedTool = tool
         pen.title = palette.selected.name + " 펜"
-        for (button, mode) in [(pen, InkCanvas.Tool.pen), (rectangle, .rectangle), (text, .text), (laser, .laser)] {
+        for (button, mode) in [(pen, InkCanvas.Tool.pen), (line, .line), (rectangle, .rectangle), (text, .text), (laser, .laser)] {
             button.state = tool == mode ? .on : .off
             button.layer?.backgroundColor = tool == mode
                 ? NSColor.white.withAlphaComponent(0.16).cgColor : nil
         }
         pen.toolTip = tool == .pen ? "펜 색상 선택" : "펜으로 전환"
+        line.toolTip = tool == .line ? "직선 색상 선택 · ⌥를 누른 채 드래그하면 화살표" : "드래그하여 직선 그리기"
         rectangle.toolTip = tool == .rectangle ? "사각형 색상 선택" : "드래그하여 사각형 그리기"
         text.toolTip = tool == .text ? "텍스트 색상 선택" : "빈 곳을 클릭해 입력하거나 기존 글을 드래그해 이동"
         laser.toolTip = tool == .laser ? "레이저 색상 선택" : "레이저로 전환 (" + shortcuts[.laser].label + ")"
@@ -90,6 +93,7 @@ final class InkToolbar: NSStackView {
     }
 
     @objc private func choosePen() { choose(.pen, button: pen) }
+    @objc private func chooseLine() { choose(.line, button: line) }
     @objc private func chooseRectangle() { choose(.rectangle, button: rectangle) }
     @objc private func chooseText() { choose(.text, button: text) }
     @objc private func chooseLaser() { choose(.laser, button: laser) }

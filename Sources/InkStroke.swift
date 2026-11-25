@@ -5,15 +5,21 @@ protocol InkMark {
     func draw(in context: CGContext, dirtyRect: CGRect)
 }
 
-/// An ink mark in progress, either a smoothed path or a rectangle outline.
+/// An ink mark in progress, drawn freehand or built from a drag's endpoints.
 final class InkStroke: InkMark {
+    enum Shape {
+        case freehand, rectangle, line
+    }
+
     struct Style: Equatable {
         var color: PenColor
         var width = 4
     }
 
     var style: Style
-    private let rectangleOrigin: CGPoint?
+    let shape: Shape
+    private let start: CGPoint
+    private var isArrow = false
     private(set) var bounds: CGRect
     private var lastSample: CGPoint
     private var anchor: CGPoint
@@ -25,9 +31,10 @@ final class InkStroke: InkMark {
     // Reserve room for the widest outline, including after restyling a stroke.
     private static let margin = CGFloat((InkStyleMenu.widths.last ?? 4) / 2 + 2)
 
-    init(start: CGPoint, color: PenColor, isRectangle: Bool = false, width: Int = 4) {
+    init(start: CGPoint, color: PenColor, shape: Shape = .freehand, width: Int = 4) {
         style = Style(color: color, width: width)
-        rectangleOrigin = isRectangle ? start : nil
+        self.shape = shape
+        self.start = start
         bounds = CGRect(origin: start, size: .zero).insetBy(dx: -Self.margin, dy: -Self.margin)
         lastSample = start
         anchor = start
@@ -44,19 +51,18 @@ final class InkStroke: InkMark {
     }
 
     var hasInk: Bool {
-        guard let rectangleOrigin else { return true }
-        return !rectangle(from: rectangleOrigin, to: lastSample).isEmpty
+        switch shape {
+        case .freehand: return true
+        case .rectangle: return !rectangle(from: start, to: lastSample).isEmpty
+        case .line: return start != lastSample
+        }
     }
 
     var tipBounds: CGRect { extent(anchor, lastSample).union(extent(anchor, startControl)) }
 
-    func append(_ point: CGPoint) -> CGRect? {
-        if let rectangleOrigin {
-            guard point != lastSample else { return nil }
-            let dirty = bounds
-            lastSample = point
-            bounds = extent(rectangleOrigin, point)
-            return dirty.union(bounds)
+    func append(_ point: CGPoint, arrow: Bool = false) -> CGRect? {
+        if shape != .freehand {
+            return updateShape(to: point, arrow: arrow)
         }
         let dx = point.x - lastSample.x
         let dy = point.y - lastSample.y
@@ -101,7 +107,45 @@ final class InkStroke: InkMark {
         return dirty
     }
 
-    private var isDot: Bool { rectangleOrigin == nil && anchor == lastSample && completed.isEmpty && segments == 0 }
+    func updateArrow(_ arrow: Bool) -> CGRect? {
+        guard shape == .line else { return nil }
+        return updateShape(to: lastSample, arrow: arrow)
+    }
+
+    private func updateShape(to point: CGPoint, arrow: Bool) -> CGRect? {
+        let showArrow = shape == .line && arrow
+        guard point != lastSample || showArrow != isArrow else { return nil }
+        let oldBounds = bounds
+        lastSample = point
+        isArrow = showArrow
+        bounds = showArrow && hasInk
+            ? linePath().boundingBox.insetBy(dx: -Self.margin, dy: -Self.margin)
+            : extent(start, point)
+        return oldBounds.union(bounds)
+    }
+
+    private func linePath() -> CGPath {
+        let path = CGMutablePath()
+        let dx = lastSample.x - start.x
+        let dy = lastSample.y - start.y
+        let length = hypot(dx, dy)
+        guard length > 0 else { return path }
+        path.move(to: start)
+        path.addLine(to: lastSample)
+        if isArrow {
+            let back = min(18, length * 0.45)
+            let halfWidth = back * 0.54
+            let ux = dx / length
+            let uy = dy / length
+            let base = CGPoint(x: lastSample.x - ux * back, y: lastSample.y - uy * back)
+            path.move(to: CGPoint(x: base.x - uy * halfWidth, y: base.y + ux * halfWidth))
+            path.addLine(to: lastSample)
+            path.addLine(to: CGPoint(x: base.x + uy * halfWidth, y: base.y - ux * halfWidth))
+        }
+        return path
+    }
+
+    private var isDot: Bool { shape == .freehand && anchor == lastSample && completed.isEmpty && segments == 0 }
 
     func contains(_ point: CGPoint) -> Bool {
         let width = CGFloat(style.width) + 8
@@ -114,9 +158,14 @@ final class InkStroke: InkMark {
     }
 
     private func visiblePath(in dirtyRect: CGRect) -> CGPath {
-        if let rectangleOrigin {
-            let rect = rectangle(from: rectangleOrigin, to: lastSample)
+        switch shape {
+        case .line:
+            return linePath()
+        case .rectangle:
+            let rect = rectangle(from: start, to: lastSample)
             return rect.isEmpty ? CGMutablePath() : CGPath(rect: rect, transform: nil)
+        case .freehand:
+            break
         }
         let visible = CGMutablePath()
         for piece in completed where piece.bounds.intersects(dirtyRect) {
