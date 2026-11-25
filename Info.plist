@@ -5,9 +5,10 @@
     <key>CFBundleIdentifier</key><string>local.lines.screenpen</string>
     <key>CFBundleName</key><string>Lines</string>
     <key>CFBundleExecutable</key><string>Lines</string>
+    <key>CFBundleIconFile</key><string>Lines.icns</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>1.0</string>
-    <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleVersion</key><string>2</string>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>LSUIElement</key><true/>
     <key>NSHighResolutionCapable</key><true/>

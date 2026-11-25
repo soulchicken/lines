@@ -24,6 +24,7 @@ enum PenColor: Int, CaseIterable {
 
 final class PenPalette: NSObject, NSMenuDelegate {
     private(set) var selected = PenColor(rawValue: UserDefaults.standard.integer(forKey: "penColor")) ?? .red
+    var shortcutLabels: [PenColor: String] = [:]
     var onChange: (() -> Void)?
 
     func select(_ color: PenColor) {
@@ -51,6 +52,9 @@ final class PenPalette: NSObject, NSMenuDelegate {
 
     func menuNeedsUpdate(_ menu: NSMenu) {
         for item in menu.items {
+            if let color = PenColor(rawValue: item.tag) {
+                item.title = (shortcutLabels[color] ?? String(color.rawValue)) + "   " + color.name
+            }
             item.state = item.tag == selected.rawValue ? .on : .off
         }
     }

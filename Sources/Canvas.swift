@@ -1,33 +1,75 @@
 import AppKit
-import Carbon.HIToolbox
+
+// A separately backed transparent view lets the compositor retain finished ink
+// while only the pointer's current stroke is changing.
+private final class LiveInkView: NSView {
+    var stroke: InkStroke?
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        stroke?.draw(in: context, dirtyRect: dirtyRect)
+    }
+}
 
 final class InkCanvas: NSView {
-    private struct Stroke {
-        let path: NSBezierPath
-        let color: PenColor
-    }
     private enum Edit {
         case addStroke
-        case clear([Stroke])
+        case clear([InkStroke])
     }
 
     private let palette: PenPalette
-    private var strokes: [Stroke] = []
+    private var strokes: [InkStroke] = []
     private var history: [Edit] = []
-    private var currentStroke: NSBezierPath?
-    private var showsHint = true
+    private let live = LiveInkView()
+    private let laser = LaserPointerView()
+    var isLaserActive: Bool { !laser.isHidden }
+    let toolbar: InkToolbar
 
     init(palette: PenPalette) {
         self.palette = palette
+        toolbar = InkToolbar(palette: palette)
         super.init(frame: .zero)
+        wantsLayer = true
+        layerContentsRedrawPolicy = .onSetNeedsDisplay
+        laser.isHidden = true
+        for overlay in [live as NSView, laser] {
+            overlay.frame = bounds
+            overlay.autoresizingMask = [.width, .height]
+            overlay.wantsLayer = true
+            overlay.layerContentsRedrawPolicy = .onSetNeedsDisplay
+            addSubview(overlay)
+        }
+        toolbar.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(toolbar)
+        NSLayoutConstraint.activate([
+            toolbar.centerXAnchor.constraint(equalTo: centerXAnchor),
+            toolbar.topAnchor.constraint(equalTo: topAnchor, constant: 52)
+        ])
         menu = palette.makeMenu()
     }
 
     required init?(coder: NSCoder) { nil }
 
-    func showColorHint() {
-        showsHint = true
-        needsDisplay = true
+    func toggleLaser() {
+        // Commit any in-progress pen stroke before switching tools.
+        if let dirty = live.stroke?.bounds { setNeedsDisplay(dirty) }
+        discardLiveInk()
+        laser.clear()
+        laser.isHidden.toggle()
+        window?.acceptsMouseMovedEvents = isLaserActive
+        if isLaserActive, let window {
+            displayLaser(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
+        }
+    }
+
+    func moveLaser(with event: NSEvent) {
+        displayLaser(at: convert(event.locationInWindow, from: nil))
+    }
+
+    func clearLaserTrail() { laser.clear() }
+
+    private func displayLaser(at point: CGPoint) {
+        if toolbar.frame.contains(point) { laser.clear() } else { laser.point(at: point) }
     }
 
     override var acceptsFirstResponder: Bool { true }
@@ -41,38 +83,49 @@ final class InkCanvas: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
+        if isLaserActive { moveLaser(with: event); return }
         let point = convert(event.locationInWindow, from: nil)
-        let path = NSBezierPath()
-        path.lineCapStyle = .round
-        path.lineJoinStyle = .round
-        path.move(to: point)
-        // A click without a drag also leaves a visible dot.
-        path.line(to: CGPoint(x: point.x + 0.01, y: point.y))
-        strokes.append(Stroke(path: path, color: palette.selected))
+        let stroke = InkStroke(start: point, color: palette.selected)
+        strokes.append(stroke)
         history.append(.addStroke)
-        currentStroke = path
-        showsHint = false
-        needsDisplay = true
+        live.stroke = stroke
+        live.setNeedsDisplay(stroke.tipBounds)
     }
 
     override func mouseDragged(with event: NSEvent) {
-        guard let path = currentStroke else { return }
-        let from = path.currentPoint
-        let to = convert(event.locationInWindow, from: nil)
-        path.line(to: to)
-        let segment = NSRect(x: min(from.x, to.x), y: min(from.y, to.y),
-                             width: abs(to.x - from.x), height: abs(to.y - from.y))
-        setNeedsDisplay(segment.insetBy(dx: -5, dy: -5))
+        if isLaserActive { moveLaser(with: event); return }
+        let point = convert(event.locationInWindow, from: nil)
+        if let dirty = live.stroke?.append(point) { live.setNeedsDisplay(dirty) }
     }
 
     override func mouseUp(with event: NSEvent) {
+        if isLaserActive { moveLaser(with: event); return }
         mouseDragged(with: event)
-        currentStroke = nil
+        if let dirty = live.stroke?.bounds { setNeedsDisplay(dirty) }
+        discardLiveInk()
+    }
+
+    private func discardLiveInk() {
+        if let dirty = live.stroke?.bounds { live.setNeedsDisplay(dirty) }
+        live.stroke = nil
+    }
+
+    func snapshotInk(scale: CGFloat) throws -> CGImage? {
+        guard !strokes.isEmpty else { return nil }
+        let width = Int((bounds.width * scale).rounded())
+        let height = Int((bounds.height * scale).rounded())
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8,
+                                      bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { throw CaptureError.imageUnavailable }
+        context.scaleBy(x: scale, y: scale)
+        for stroke in strokes { stroke.draw(in: context, dirtyRect: bounds) }
+        guard let ink = context.makeImage() else { throw CaptureError.imageUnavailable }
+        return ink
     }
 
     func undoLastEdit() {
         guard let edit = history.popLast() else { return }
-        currentStroke = nil
+        discardLiveInk()
         switch edit {
         case .addStroke: strokes.removeLast()
         case .clear(let previous): strokes = previous
@@ -84,7 +137,7 @@ final class InkCanvas: NSView {
         guard !strokes.isEmpty else { return }
         history.append(.clear(strokes))
         strokes.removeAll()
-        currentStroke = nil
+        discardLiveInk()
         needsDisplay = true
     }
 
@@ -92,25 +145,10 @@ final class InkCanvas: NSView {
         // A fully transparent area of a macOS window can pass clicks through.
         NSColor.black.withAlphaComponent(0.01).setFill()
         dirtyRect.fill(using: .copy)
-        for stroke in strokes where stroke.path.bounds.insetBy(dx: -5, dy: -5).intersects(dirtyRect) {
-            let path = stroke.path
-            NSColor.white.withAlphaComponent(0.9).setStroke()
-            path.lineWidth = 6
-            path.stroke()
-            stroke.color.ink.setStroke()
-            path.lineWidth = 4
-            path.stroke()
-        }
-        if showsHint {
-            let hint = NSAttributedString(string: "\(palette.selected.name) 펜    ·    1–4 또는 우클릭으로 색 선택    ·    ⌘Z 취소    ·    Esc 종료",
-                                          attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .medium),
-                                                       .foregroundColor: NSColor.white])
-            let size = hint.size()
-            let box = NSRect(x: (bounds.width - size.width) / 2 - 14, y: bounds.height - 88,
-                             width: size.width + 28, height: size.height + 14)
-            NSColor.black.withAlphaComponent(0.78).setFill()
-            NSBezierPath(roundedRect: box, xRadius: box.height / 2, yRadius: box.height / 2).fill()
-            hint.draw(at: NSPoint(x: box.minX + 14, y: box.minY + 7))
+        if let context = NSGraphicsContext.current?.cgContext {
+            context.saveGState()
+            for stroke in strokes where stroke !== live.stroke { stroke.draw(in: context, dirtyRect: dirtyRect) }
+            context.restoreGState()
         }
     }
 }
@@ -118,6 +156,8 @@ final class InkCanvas: NSView {
 final class InkPanel: NSPanel {
     let canvas: InkCanvas
     private let palette: PenPalette
+    var onToggleLaser: (() -> Void)?
+    var onCapture: (() -> Void)?
     var onFinish: (() -> Void)?
     override var canBecomeKey: Bool { true }
     override var canBecomeMain: Bool { false }
@@ -137,25 +177,48 @@ final class InkPanel: NSPanel {
         collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         animationBehavior = .none
         contentView = canvas
+        canvas.toolbar.onAction = { [weak self] in self?.perform($0) }
         isReleasedWhenClosed = false
     }
 
-    func handleShortcut(_ event: NSEvent) -> Bool {
-        let modifiers = event.modifierFlags.intersection([.command, .shift, .control, .option])
-        let character = event.charactersIgnoringModifiers?.lowercased()
-        if modifiers == .command && (character == "z" || Int(event.keyCode) == kVK_ANSI_Z) {
-            canvas.undoLastEdit()
-            return true
+    private var previousCoalescing: Bool?
+
+    override func becomeKey() {
+        super.becomeKey()
+        if previousCoalescing == nil {
+            previousCoalescing = NSEvent.isMouseCoalescingEnabled
+            NSEvent.isMouseCoalescingEnabled = false
         }
-        guard modifiers.isEmpty else { return false }
-        switch Int(event.keyCode) {
-        case kVK_Escape: onFinish?()
-        case kVK_Delete, kVK_ForwardDelete: canvas.clear()
-        default:
-            guard let character, let number = Int(character), let color = PenColor(rawValue: number)
-            else { return false }
-            palette.select(color)
+    }
+
+    override func sendEvent(_ event: NSEvent) {
+        if event.type == .mouseMoved && canvas.isLaserActive {
+            canvas.moveLaser(with: event)
+            // Allow AppKit to update button hover states and tooltips.
         }
-        return true
+        super.sendEvent(event)
+    }
+
+    override func resignKey() {
+        canvas.clearLaserTrail()
+        if let previousCoalescing {
+            NSEvent.isMouseCoalescingEnabled = previousCoalescing
+            self.previousCoalescing = nil
+        }
+        super.resignKey()
+    }
+
+    func perform(_ action: ShortcutAction) {
+        switch action {
+        case .toggle, .finish: onFinish?()
+        case .capture: onCapture?()
+        case .laser: onToggleLaser?()
+        case .undo: canvas.undoLastEdit()
+        case .clear: canvas.clear()
+        case .red: palette.select(.red)
+        case .blue: palette.select(.blue)
+        case .green: palette.select(.green)
+        case .yellow: palette.select(.yellow)
+        }
     }
 }
