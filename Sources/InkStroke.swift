@@ -28,8 +28,10 @@ final class InkStroke: InkMark {
     private var segments = 0
     private var completed: [(path: CGPath, bounds: CGRect)] = []
 
-    // Reserve room for the widest outline, including after restyling a stroke.
-    private static let margin = CGFloat((InkStyleMenu.widths.last ?? 4) / 2 + 2)
+    private static let edgeLayers: [(spread: CGFloat, opacity: CGFloat)] = [(1.5, 0.07), (0.75, 0.18)]
+
+    // Include the soft edge and antialiasing even after the stroke is restyled.
+    private static let margin = CGFloat((InkStyleMenu.widths.last ?? 4) / 2 + 3)
 
     init(start: CGPoint, color: PenColor, shape: Shape = .freehand, width: Int = 4) {
         style = Style(color: color, width: width)
@@ -186,8 +188,11 @@ final class InkStroke: InkMark {
         if isDot {
             let center = CGRect(origin: lastSample, size: .zero)
             let radius = CGFloat(style.width) / 2
-            context.setFillColor(NSColor.white.withAlphaComponent(0.9).cgColor)
-            context.fillEllipse(in: center.insetBy(dx: -radius - 1, dy: -radius - 1))
+            for layer in Self.edgeLayers {
+                let edgeRadius = radius + layer.spread
+                context.setFillColor(NSColor(white: 1, alpha: layer.opacity).cgColor)
+                context.fillEllipse(in: center.insetBy(dx: -edgeRadius, dy: -edgeRadius))
+            }
             context.setFillColor(style.color.ink.cgColor)
             context.fillEllipse(in: center.insetBy(dx: -radius, dy: -radius))
             return
@@ -199,11 +204,14 @@ final class InkStroke: InkMark {
     private func stroke(_ path: CGPath, in context: CGContext) {
         context.setLineCap(.round)
         context.setLineJoin(.round)
-        context.setLineWidth(CGFloat(style.width + 2))
-        context.setStrokeColor(NSColor.white.withAlphaComponent(0.9).cgColor)
-        context.addPath(path)
-        context.strokePath()
-        context.setLineWidth(CGFloat(style.width))
+        let width = CGFloat(style.width)
+        for layer in Self.edgeLayers {
+            context.setLineWidth(width + 2 * layer.spread)
+            context.setStrokeColor(NSColor(white: 1, alpha: layer.opacity).cgColor)
+            context.addPath(path)
+            context.strokePath()
+        }
+        context.setLineWidth(width)
         context.setStrokeColor(style.color.ink.cgColor)
         context.addPath(path)
         context.strokePath()
