@@ -59,6 +59,10 @@ final class InkCanvas: NSView, NSTextViewDelegate {
         toolbar.translatesAutoresizingMaskIntoConstraints = false
         toolbar.onSelectTool = { [weak self] in self?.selectTool($0) }
         toolbar.makeColorMenu = { [weak self] in self?.toolColorMenu(for: $0) }
+        laser.onCursorChange = { [weak self] in
+            guard let self, self.isLaserActive else { return }
+            self.window?.invalidateCursorRects(for: self)
+        }
         addSubview(toolbar)
         NSLayoutConstraint.activate([
             toolbar.centerXAnchor.constraint(equalTo: centerXAnchor),
@@ -82,32 +86,28 @@ final class InkCanvas: NSView, NSTextViewDelegate {
         self.tool = tool
         laser.clear()
         laser.isHidden = !isLaserActive
-        window?.acceptsMouseMovedEvents = isLaserActive
-        if isLaserActive, let window {
-            displayLaser(at: convert(window.mouseLocationOutsideOfEventStream, from: nil))
-        }
         window?.invalidateCursorRects(for: self)
         onToolChange?()
     }
 
-    func moveLaser(with event: NSEvent) {
-        displayLaser(at: convert(event.locationInWindow, from: nil))
-    }
-
     func clearLaserTrail() { laser.clear() }
-
-    private func displayLaser(at point: CGPoint) {
-        if toolbar.frame.contains(point) { laser.clear() } else { laser.point(at: point) }
-    }
 
     override var acceptsFirstResponder: Bool { true }
     override var needsPanelToBecomeKey: Bool { true }
     override var mouseDownCanMoveWindow: Bool { false }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    var drawingCursor: NSCursor {
+        switch tool {
+        case .laser: return laser.pointerCursor
+        case .text: return .iBeam
+        default: return .crosshair
+        }
+    }
+
     override func resetCursorRects() {
         super.resetCursorRects()
-        addCursorRect(bounds, cursor: tool == .text ? .iBeam : .crosshair)
+        addCursorRect(bounds, cursor: drawingCursor)
     }
 
     private var widthPreferenceKey: String {
@@ -193,8 +193,9 @@ final class InkCanvas: NSView, NSTextViewDelegate {
             }
         case .laser:
             return InkStyleMenu.colors(selected: laser.color) { [weak self] color in
-                self?.laser.color = color
-                self?.refreshToolbarColor()
+                guard let self else { return }
+                self.laser.color = color
+                self.refreshToolbarColor()
             }
         }
     }
@@ -251,8 +252,11 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     override func mouseDown(with event: NSEvent) {
-        if isLaserActive { moveLaser(with: event); return }
         let point = convert(event.locationInWindow, from: nil)
+        if isLaserActive {
+            laser.press(at: point)
+            return
+        }
         if tool == .text {
             finishTextDrag()
             if textDraft != nil {
@@ -279,8 +283,11 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     override func mouseDragged(with event: NSEvent) {
-        if isLaserActive { moveLaser(with: event); return }
         let point = convert(event.locationInWindow, from: nil)
+        if isLaserActive {
+            laser.drag(to: point)
+            return
+        }
         if let drag = textDrag {
             let previous = marks[drag.index].bounds
             let moved = drag.original.moved(dx: point.x - drag.start.x, dy: point.y - drag.start.y, within: bounds)
@@ -301,7 +308,10 @@ final class InkCanvas: NSView, NSTextViewDelegate {
     }
 
     override func mouseUp(with event: NSEvent) {
-        if isLaserActive { moveLaser(with: event); return }
+        if isLaserActive {
+            laser.release(at: convert(event.locationInWindow, from: nil))
+            return
+        }
         mouseDragged(with: event)
         finishTextDrag()
         finishLiveInk()
@@ -474,10 +484,6 @@ final class InkPanel: NSPanel {
     }
 
     override func sendEvent(_ event: NSEvent) {
-        if event.type == .mouseMoved && canvas.isLaserActive {
-            canvas.moveLaser(with: event)
-            // Allow AppKit to update button hover states and tooltips.
-        }
         if event.type == .flagsChanged && canvas.tool == .line {
             canvas.updateArrowPreview(event.modifierFlags)
         }
