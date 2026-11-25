@@ -3,7 +3,6 @@ import AppKit
 struct InkText: InkMark {
     static let font = NSFont.systemFont(ofSize: 22, weight: .semibold)
     static let padding = CGSize(width: 10, height: 7)
-    static let background = NSColor(white: 1, alpha: 0.96)
 
     let bounds: CGRect
     private let content: NSAttributedString
@@ -33,8 +32,6 @@ struct InkText: InkMark {
         guard bounds.intersects(dirtyRect) else { return }
         NSGraphicsContext.saveGraphicsState()
         NSGraphicsContext.current = NSGraphicsContext(cgContext: context, flipped: false)
-        Self.background.setFill()
-        NSBezierPath(roundedRect: bounds, xRadius: 7, yRadius: 7).fill()
         content.draw(with: textFrame, options: Self.options)
         NSGraphicsContext.restoreGraphicsState()
     }

@@ -137,16 +137,17 @@ final class InkCanvas: NSView {
         let scroll = NSTextView.scrollableTextView()
         guard let editor = scroll.documentView as? NSTextView else { return }
         scroll.frame = frame
-        scroll.appearance = NSAppearance(named: .aqua)
         scroll.borderType = .lineBorder
+        scroll.drawsBackground = false
         scroll.hasHorizontalScroller = false
         editor.isRichText = false
         editor.importsGraphics = false
         editor.allowsUndo = true
         editor.font = InkText.font
-        editor.backgroundColor = InkText.background
+        editor.drawsBackground = false
         let color = palette.selected
         editor.textColor = color.ink
+        editor.insertionPointColor = color.ink
         editor.textContainerInset = InkText.padding
         editor.textContainer?.lineFragmentPadding = 0
         editor.setAccessibilityLabel("화면에 넣을 텍스트")
