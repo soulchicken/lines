@@ -13,7 +13,12 @@ Lines는 강의 자료 위에 잠깐 필기한 뒤 발표로 돌아가는 macOS 
 - `Sources/main.swift`는 AppKit 이벤트 루프를 시작한다.
 - `Sources/AppDelegate.swift`는 메뉴 막대, Carbon 전역 단축키, 포인터가 있는 디스플레이의 필기 창 수명과 키보드 이벤트 모니터를 관리한다.
 - `Sources/Canvas.swift`의 `InkPanel`은 필기 단축키를 처리하고, `InkCanvas`는 각 획의 경로·색상과 실행 취소 기록을 관리한다.
+- `Sources/InkToolbar.swift`는 화면 상단의 펜·레이저 전환, 캡처, 실행 취소, 종료 버튼을 표시한다.
+- `Sources/InkStroke.swift`는 드래그 좌표 사이의 곡선과 포인터까지의 마지막 구간을 그린다.
+- `Sources/LaserPointerView.swift`는 필기 기록과 별도로 움직임을 따라가는 레이저 점과 꼬리를 그린다.
+- `Sources/ScreenCapture.swift`는 ScreenCaptureKit으로 선택한 디스플레이를 캡처하고 필기와 합성해 PNG로 저장한다.
 - `Sources/PenPalette.swift`는 색상 선택 메뉴와 마지막 색상의 UserDefaults 저장을 담당한다.
+- `Sources/Shortcuts.swift`는 단축키 기본값·저장·입력 매칭을, `Sources/ShortcutSettings.swift`는 설정창과 키 입력을 담당한다.
 
 ## 동작 확인
 
