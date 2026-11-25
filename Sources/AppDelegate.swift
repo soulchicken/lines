@@ -87,7 +87,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return false
         }
         guard let action = shortcuts.action(for: key), action != .toggle else { return false }
-        if action == .laser && event.isARepeat { return true }
         panel?.perform(action)
         return true
     }
@@ -146,7 +145,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         else { return }
         let overlay = InkPanel(on: screen, palette: palette)
         overlay.onFinish = { [weak self] in self?.finishInk() }
-        overlay.onToggleLaser = { [weak self] in self?.toggleLaser() }
         overlay.onCapture = { [weak self] in self?.captureScreen() }
         overlay.canvas.onToolChange = { [weak self] in self?.updateStatus() }
         panel = overlay
@@ -220,8 +218,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let label = active ? "필기 마치기" : "필기 시작"
         toggleItem.title = hotKey == nil ? label : label + "    " + shortcuts[.toggle].label
         warningItem.isHidden = hotKey != nil
-        laserItem.title = (panel?.canvas.isLaserActive == true ? "펜으로 전환" : "레이저 포인터")
-            + (active ? "    " + shortcuts[.laser].label : "")
+        let isLaserActive = panel?.canvas.isLaserActive == true
+        laserItem.title = isLaserActive ? "펜으로 전환    " + shortcuts[.pen].label
+            : "레이저 포인터" + (active ? "    " + shortcuts[.laser].label : "")
         captureItem.title = "화면 캡처…" + (active ? "    " + shortcuts[.capture].label : "")
         for (action, item) in editItems { item.title = shortcuts[action].label + "   " + action.title }
         palette.shortcutLabels = [.red: shortcuts[.red].label, .blue: shortcuts[.blue].label,

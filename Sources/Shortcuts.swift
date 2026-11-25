@@ -2,15 +2,21 @@ import AppKit
 import Carbon.HIToolbox
 
 enum ShortcutAction: String, CaseIterable {
-    case toggle, undo, clear, finish, capture, laser, red, blue, green, yellow
+    case toggle, pen, line, rectangle, text, laser, undo, clear, finish, capture, red, blue, green, yellow
+
+    static let toolSelections: [Self] = [.pen, .line, .rectangle, .text, .laser]
 
     var title: String {
         switch self {
         case .toggle: return "필기 시작 / 마치기"
+        case .pen: return "펜 선택"
+        case .line: return "직선 선택"
+        case .rectangle: return "사각형 선택"
+        case .text: return "텍스트 선택"
+        case .laser: return "레이저 선택"
         case .undo: return "실행 취소"
         case .clear: return "전체 지우기"
         case .finish: return "필기 마치기"
-        case .laser: return "펜 / 레이저 전환"
         case .capture: return "화면 캡처"
         case .red: return "빨강 펜"
         case .blue: return "파랑 펜"
@@ -22,10 +28,14 @@ enum ShortcutAction: String, CaseIterable {
     var defaultKey: KeyBinding {
         switch self {
         case .toggle: return KeyBinding(kVK_ANSI_Grave, "`", optionKey)
+        case .pen: return KeyBinding(kVK_ANSI_Q, "Q")
+        case .line: return KeyBinding(kVK_ANSI_W, "W")
+        case .rectangle: return KeyBinding(kVK_ANSI_E, "E")
+        case .text: return KeyBinding(kVK_ANSI_R, "R")
+        case .laser: return KeyBinding(kVK_ANSI_A, "A")
         case .undo: return KeyBinding(kVK_ANSI_Z, "Z", cmdKey)
         case .clear: return KeyBinding(kVK_Delete, "Delete")
         case .finish: return KeyBinding(kVK_Escape, "Esc")
-        case .laser: return KeyBinding(kVK_ANSI_L, "L")
         case .capture: return KeyBinding(kVK_ANSI_S, "S", cmdKey)
         case .red: return KeyBinding(kVK_ANSI_1, "1")
         case .blue: return KeyBinding(kVK_ANSI_2, "2")
@@ -101,7 +111,7 @@ struct Shortcuts {
            let values = try? JSONDecoder().decode([String: KeyBinding].self, from: data) {
             saved = values
             // A new default must not take over a key the user already assigned.
-            for action in [ShortcutAction.toggle, .capture, .laser] where saved[action.rawValue] == nil {
+            for action in [.toggle, .capture] + ShortcutAction.toolSelections where saved[action.rawValue] == nil {
                 let key = action.defaultKey
                 guard saved.values.contains(where: { $0.sameKeys(as: key) }) else { continue }
                 let masks = [cmdKey | shiftKey, cmdKey | optionKey, cmdKey | controlKey,

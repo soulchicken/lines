@@ -73,7 +73,7 @@ final class InkCanvas: NSView, NSTextViewDelegate {
         selectTool(isLaserActive ? .pen : .laser)
     }
 
-    private func selectTool(_ tool: Tool) {
+    func selectTool(_ tool: Tool) {
         guard self.tool != tool else { return }
         commitText()
         finishTextDrag()
@@ -419,7 +419,6 @@ final class InkCanvas: NSView, NSTextViewDelegate {
 final class InkPanel: NSPanel {
     let canvas: InkCanvas
     private let palette: PenPalette
-    var onToggleLaser: (() -> Void)?
     var onCapture: (() -> Void)?
     var onFinish: (() -> Void)?
     override var canBecomeKey: Bool { true }
@@ -478,7 +477,11 @@ final class InkPanel: NSPanel {
         switch action {
         case .toggle, .finish: onFinish?()
         case .capture: onCapture?()
-        case .laser: onToggleLaser?()
+        case .pen: canvas.selectTool(.pen)
+        case .line: canvas.selectTool(.line)
+        case .rectangle: canvas.selectTool(.rectangle)
+        case .text: canvas.selectTool(.text)
+        case .laser: canvas.selectTool(.laser)
         case .undo: canvas.undoLastEdit()
         case .clear: canvas.clear()
         case .red: palette.select(.red)

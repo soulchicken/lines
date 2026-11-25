@@ -2,7 +2,7 @@ import AppKit
 import Carbon.HIToolbox
 
 final class ShortcutSettings: NSObject, NSWindowDelegate {
-    let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 550),
+    let window = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 400, height: 670),
                          styleMask: [.titled, .closable, .nonactivatingPanel], backing: .buffered, defer: false)
     private let message = NSTextField(wrappingLabelWithString: "")
     private var buttons: [ShortcutAction: NSButton] = [:]
@@ -30,7 +30,7 @@ final class ShortcutSettings: NSObject, NSWindowDelegate {
         let content = window.contentView!
         content.addSubview(stack)
         for action in ShortcutAction.allCases {
-            if action == .toggle || action == .undo {
+            if action == .toggle || action == .pen {
                 let heading = NSTextField(labelWithString: action == .toggle ? "모든 앱에서" : "필기 중")
                 heading.font = .boldSystemFont(ofSize: 13)
                 stack.addArrangedSubview(heading)
