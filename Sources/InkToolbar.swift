@@ -35,8 +35,8 @@ final class InkToolbar: NSStackView {
         color.heightAnchor.constraint(greaterThanOrEqualToConstant: 24).isActive = true
         add(pen, "펜", "pencil.tip", #selector(choosePen))
         add(line, "직선", "line.diagonal", #selector(chooseLine))
-        add(rectangle, "사각형", "rectangle", #selector(chooseRectangle))
         add(text, "텍스트", "textformat", #selector(chooseText))
+        add(rectangle, "사각형", "rectangle", #selector(chooseRectangle))
         add(laser, "레이저", "scope", #selector(chooseLaser))
         let divider = NSBox()
         divider.boxType = .separator

@@ -2,17 +2,17 @@ import AppKit
 import Carbon.HIToolbox
 
 enum ShortcutAction: String, CaseIterable {
-    case toggle, pen, line, rectangle, text, laser, undo, clear, finish, capture, red, blue, green, yellow
+    case toggle, pen, line, text, rectangle, laser, undo, clear, finish, capture, red, blue, green, yellow
 
-    static let toolSelections: [Self] = [.pen, .line, .rectangle, .text, .laser]
+    static let toolSelections: [Self] = [.pen, .line, .text, .rectangle, .laser]
 
     var title: String {
         switch self {
         case .toggle: return "필기 시작 / 마치기"
         case .pen: return "펜 선택"
         case .line: return "직선 선택"
-        case .rectangle: return "사각형 선택"
         case .text: return "텍스트 선택"
+        case .rectangle: return "사각형 선택"
         case .laser: return "레이저 선택"
         case .undo: return "실행 취소"
         case .clear: return "전체 지우기"
@@ -30,8 +30,8 @@ enum ShortcutAction: String, CaseIterable {
         case .toggle: return KeyBinding(kVK_ANSI_Grave, "`", optionKey)
         case .pen: return KeyBinding(kVK_ANSI_Q, "Q")
         case .line: return KeyBinding(kVK_ANSI_W, "W")
-        case .rectangle: return KeyBinding(kVK_ANSI_E, "E")
-        case .text: return KeyBinding(kVK_ANSI_R, "R")
+        case .text: return KeyBinding(kVK_ANSI_E, "E")
+        case .rectangle: return KeyBinding(kVK_ANSI_R, "R")
         case .laser: return KeyBinding(kVK_ANSI_A, "A")
         case .undo: return KeyBinding(kVK_ANSI_Z, "Z", cmdKey)
         case .clear: return KeyBinding(kVK_Delete, "Delete")
