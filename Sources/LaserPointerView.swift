@@ -20,7 +20,7 @@ final class LaserPointerView: NSView {
 
     private struct FadeSection {
         let path: CGPath
-        let lifetime: TimeInterval
+        let durationFraction: Double
     }
 
     private var samples: [Sample] = []
@@ -36,7 +36,6 @@ final class LaserPointerView: NSView {
         }
     }
     private var tailDistance: CGFloat = 0
-    private let trailFadeDuration: TimeInterval = 0.8
     var onCursorChange: (() -> Void)?
     var duration = Duration(rawValue: UserDefaults.standard.double(forKey: "laserDuration")) ?? .standard {
         didSet {
@@ -135,7 +134,7 @@ final class LaserPointerView: NSView {
     private func startFadeTimer() {
         let ticker = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
             guard let self, let releasedAt = self.releasedAt else { timer.invalidate(); return }
-            if ProcessInfo.processInfo.systemUptime - releasedAt >= self.trailFadeDuration {
+            if ProcessInfo.processInfo.systemUptime - releasedAt >= self.duration.rawValue {
                 self.clearTrail()
             } else {
                 self.setNeedsDisplay(self.paintedBounds)
@@ -236,6 +235,7 @@ final class LaserPointerView: NSView {
         // Cache overlapping suffixes at equal distances. Opacity can then
         // vary along the curve without redrawing its geometry or leaving joints.
         let count = 20
+        let firstSectionFraction = 0.2875
         var next = 1
         return (0..<count).map { index in
             let cutoff = end * CGFloat(index) / CGFloat(count)
@@ -247,8 +247,8 @@ final class LaserPointerView: NSView {
             section.move(to: CGPoint(x: from.point.x + (to.point.x - from.point.x) * fraction,
                                      y: from.point.y + (to.point.y - from.point.y) * fraction))
             for point in points[next...] { section.addLine(to: point.point) }
-            let lifetime = 0.23 + (trailFadeDuration - 0.23) * Double(index) / Double(count - 1)
-            return FadeSection(path: section, lifetime: lifetime)
+            let durationFraction = firstSectionFraction + (1 - firstSectionFraction) * Double(index) / Double(count - 1)
+            return FadeSection(path: section, durationFraction: durationFraction)
         }
     }
 
@@ -259,12 +259,12 @@ final class LaserPointerView: NSView {
         context.setLineJoin(.round)
         let layers: [(width: CGFloat, opacity: CGFloat)] = [(9, 0.05), (5.5, 0.12), (2.7, 0.68)]
         if let releasedAt {
-            let elapsed = now - releasedAt
+            let elapsedFraction = (now - releasedAt) / duration.rawValue
             for layer in layers {
                 context.setLineWidth(layer.width)
                 var previous: CGFloat = 0
                 for section in fadeSections {
-                    let t = min(1, max(0, elapsed / section.lifetime))
+                    let t = min(1, max(0, elapsedFraction / section.durationFraction))
                     let opacity = layer.opacity * alpha * CGFloat(1 - t * t * (3 - 2 * t))
                     guard opacity - previous >= 1.0 / 255 else { continue }
                     context.setStrokeColor(color.withAlphaComponent((opacity - previous) / (1 - previous)).cgColor)
