@@ -23,13 +23,22 @@ final class LaserPointerView: NSView {
         let durationFraction: Double
     }
 
+    private struct FadingTrail {
+        let sections: [FadeSection]
+        let bounds: CGRect
+        let alpha: CGFloat
+        let releasedAt: TimeInterval
+    }
+
+    private static let trailLayers: [(width: CGFloat, opacity: CGFloat)] = [(9, 0.05), (5.5, 0.12), (2.7, 0.68)]
+
     private var samples: [Sample] = []
-    private var fadeSections: [FadeSection] = []
+    private var fadingTrails: [FadingTrail] = []
     private var fadeTimer: Timer?
     private var highlightTimer: Timer?
-    private var paintedBounds = CGRect.null
+    private var liveBounds = CGRect.null
     private var isPressed = false
-    private var releasedAt: TimeInterval?
+    private var lastReleaseAt: TimeInterval?
     private var isHighlighted = false {
         didSet {
             if isHighlighted != oldValue { onCursorChange?() }
@@ -53,7 +62,8 @@ final class LaserPointerView: NSView {
             brightCursor = Self.makePointerCursor(for: color, highlighted: true)
             UserDefaults.standard.set(color.rawValue, forKey: "laserColor")
             onCursorChange?()
-            if !paintedBounds.isNull { setNeedsDisplay(paintedBounds) }
+            if !liveBounds.isNull { setNeedsDisplay(liveBounds) }
+            for trail in fadingTrails { setNeedsDisplay(trail.bounds) }
         }
     }
     private lazy var normalCursor = Self.makePointerCursor(for: color, highlighted: false)
@@ -88,10 +98,10 @@ final class LaserPointerView: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 
     func press(at position: CGPoint) {
-        clearTrail()
+        clearLiveTrail()
         highlightTimer?.invalidate()
         highlightTimer = nil
-        releasedAt = nil
+        lastReleaseAt = nil
         isPressed = true
         isHighlighted = true
         record(position)
@@ -107,14 +117,18 @@ final class LaserPointerView: NSView {
         let now = ProcessInfo.processInfo.systemUptime
         record(position)
         isPressed = false
-        releasedAt = now
-        fadeSections = makeFadeSections()
-        if !fadeSections.isEmpty { startFadeTimer() }
+        lastReleaseAt = now
+        let sections = makeFadeSections()
+        if !sections.isEmpty {
+            fadingTrails.append(FadingTrail(sections: sections, bounds: liveBounds, alpha: liveAlpha, releasedAt: now))
+            startFadeTimer()
+        }
+        clearLiveTrail()
         scheduleHighlightEnd()
     }
 
     private func record(_ position: CGPoint) {
-        guard bounds.contains(position) else { clearTrail(); return }
+        guard bounds.contains(position) else { clearLiveTrail(); return }
 
         if let last = samples.last {
             if position != last.point {
@@ -132,12 +146,17 @@ final class LaserPointerView: NSView {
     }
 
     private func startFadeTimer() {
+        guard fadeTimer == nil else { return }
         let ticker = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] timer in
-            guard let self, let releasedAt = self.releasedAt else { timer.invalidate(); return }
-            if ProcessInfo.processInfo.systemUptime - releasedAt >= self.duration.rawValue {
-                self.clearTrail()
-            } else {
-                self.setNeedsDisplay(self.paintedBounds)
+            guard let self else { timer.invalidate(); return }
+            let cutoff = ProcessInfo.processInfo.systemUptime - self.duration.rawValue
+            self.fadingTrails.removeAll { trail in
+                self.setNeedsDisplay(trail.bounds)
+                return trail.releasedAt <= cutoff
+            }
+            if self.fadingTrails.isEmpty {
+                timer.invalidate()
+                self.fadeTimer = nil
             }
         }
         RunLoop.main.add(ticker, forMode: .common)
@@ -147,8 +166,8 @@ final class LaserPointerView: NSView {
     private func scheduleHighlightEnd() {
         highlightTimer?.invalidate()
         highlightTimer = nil
-        guard let releasedAt, isHighlighted else { return }
-        let remaining = duration.rawValue - (ProcessInfo.processInfo.systemUptime - releasedAt)
+        guard let lastReleaseAt, isHighlighted else { return }
+        let remaining = duration.rawValue - (ProcessInfo.processInfo.systemUptime - lastReleaseAt)
         if remaining <= 0 {
             isHighlighted = false
             return
@@ -174,27 +193,33 @@ final class LaserPointerView: NSView {
         for sample in samples {
             next = next.union(CGRect(origin: sample.point, size: .zero).insetBy(dx: -6, dy: -6))
         }
-        setNeedsDisplay(paintedBounds.union(next))
-        paintedBounds = next
+        setNeedsDisplay(liveBounds.union(next))
+        liveBounds = next
     }
 
     func clear() {
         isPressed = false
-        releasedAt = nil
+        lastReleaseAt = nil
         highlightTimer?.invalidate()
         highlightTimer = nil
         isHighlighted = false
-        clearTrail()
-    }
-
-    private func clearTrail() {
         fadeTimer?.invalidate()
         fadeTimer = nil
+        for trail in fadingTrails { setNeedsDisplay(trail.bounds) }
+        fadingTrails.removeAll()
+        clearLiveTrail()
+    }
+
+    private func clearLiveTrail() {
         samples.removeAll(keepingCapacity: true)
-        fadeSections.removeAll()
         tailDistance = 0
-        if !paintedBounds.isNull { setNeedsDisplay(paintedBounds) }
-        paintedBounds = .null
+        if !liveBounds.isNull { setNeedsDisplay(liveBounds) }
+        liveBounds = .null
+    }
+
+    private var liveAlpha: CGFloat {
+        guard let head = samples.last else { return 0 }
+        return min(1, (head.distance - tailDistance) / 12)
     }
 
     private func livePath() -> CGPath? {
@@ -252,33 +277,19 @@ final class LaserPointerView: NSView {
         }
     }
 
-    private func drawTrail(in context: CGContext, color: NSColor, at now: TimeInterval) {
-        guard samples.count > 1, let head = samples.last else { return }
-        let alpha = min(1, (head.distance - tailDistance) / 12)
-        context.setLineCap(.round)
-        context.setLineJoin(.round)
-        let layers: [(width: CGFloat, opacity: CGFloat)] = [(9, 0.05), (5.5, 0.12), (2.7, 0.68)]
-        if let releasedAt {
-            let elapsedFraction = (now - releasedAt) / duration.rawValue
-            for layer in layers {
-                context.setLineWidth(layer.width)
-                var previous: CGFloat = 0
-                for section in fadeSections {
-                    let t = min(1, max(0, elapsedFraction / section.durationFraction))
-                    let opacity = layer.opacity * alpha * CGFloat(1 - t * t * (3 - 2 * t))
-                    guard opacity - previous >= 1.0 / 255 else { continue }
-                    context.setStrokeColor(color.withAlphaComponent((opacity - previous) / (1 - previous)).cgColor)
-                    context.addPath(section.path)
-                    context.strokePath()
-                    previous = opacity
-                }
-            }
-        } else if let path = livePath() {
-            for layer in layers {
-                context.setLineWidth(layer.width)
-                context.setStrokeColor(color.withAlphaComponent(layer.opacity * alpha).cgColor)
-                context.addPath(path)
+    private func draw(_ trail: FadingTrail, in context: CGContext, ink: NSColor, at now: TimeInterval) {
+        let elapsedFraction = (now - trail.releasedAt) / duration.rawValue
+        for layer in Self.trailLayers {
+            context.setLineWidth(layer.width)
+            var previous: CGFloat = 0
+            for section in trail.sections {
+                let t = min(1, max(0, elapsedFraction / section.durationFraction))
+                let opacity = layer.opacity * trail.alpha * CGFloat(1 - t * t * (3 - 2 * t))
+                guard opacity - previous >= 1.0 / 255 else { continue }
+                context.setStrokeColor(ink.withAlphaComponent((opacity - previous) / (1 - previous)).cgColor)
+                context.addPath(section.path)
                 context.strokePath()
+                previous = opacity
             }
         }
     }
@@ -286,7 +297,22 @@ final class LaserPointerView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         guard let ctx = NSGraphicsContext.current?.cgContext else { return }
         ctx.saveGState()
-        drawTrail(in: ctx, color: color.ink, at: ProcessInfo.processInfo.systemUptime)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+        let now = ProcessInfo.processInfo.systemUptime
+        let ink = color.ink
+        for trail in fadingTrails where dirtyRect.intersects(trail.bounds) {
+            draw(trail, in: ctx, ink: ink, at: now)
+        }
+        if dirtyRect.intersects(liveBounds), let path = livePath() {
+            let alpha = liveAlpha
+            for layer in Self.trailLayers {
+                ctx.setLineWidth(layer.width)
+                ctx.setStrokeColor(ink.withAlphaComponent(layer.opacity * alpha).cgColor)
+                ctx.addPath(path)
+                ctx.strokePath()
+            }
+        }
         ctx.restoreGState()
     }
 }
