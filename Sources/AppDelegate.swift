@@ -184,14 +184,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 }
             } catch {
                 let alert = NSAlert()
-                alert.messageText = "화면 캡처를 저장할 수 없어요."
                 let failure = error as NSError
                 if failure.domain == SCStreamErrorDomain && failure.code == SCStreamError.Code.userDeclined.rawValue {
-                    alert.informativeText = "시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 녹음에서 Lines를 허용한 뒤 다시 시도하세요."
+                    alert.messageText = "화면 캡처 권한을 확인해 주세요."
+                    alert.informativeText = """
+                        macOS 권한 요청이 열려 있으면 그 창에서 허용하세요.
+
+                        이미 허용했는데도 캡처가 막히면 시스템 설정 → 개인정보 보호 및 보안 → 화면 및 시스템 오디오 녹음에서 기존 Lines 항목을 제거하고 현재 Lines.app을 추가하세요.
+
+                        허용한 뒤 Lines를 종료하고 다시 열어 캡처하세요.
+                        """
+                    // The system can still be presenting the permission prompt when this error arrives.
+                    alert.window.level = .normal
                 } else {
+                    alert.messageText = "화면 캡처를 저장할 수 없어요."
                     alert.informativeText = error.localizedDescription
+                    alert.window.level = .screenSaver
                 }
-                alert.window.level = .screenSaver
                 alert.runModal()
             }
         }
